@@ -1,11 +1,14 @@
-CXX=g++
-CXXFLAGS=-Wall -I/usr/include/lua5.4 -I/usr/include/SDL2
-LDFLAGS=-llua5.4 -lSDL2 -lGL -lm -ldl
+CXX = g++
+CXXFLAGS = -Wall -std=c++11 -I/usr/include/lua5.4 -I/usr/include/SDL2 -I./imgui -I./imgui/backends
+LDFLAGS = -llua5.4 -lSDL2 -lGL -lm -ldl
+
+IMGUI_SRC = imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
+SRC = main.cpp $(IMGUI_SRC)
 
 all: engine
 
-engine: main.cpp
-	$(CXX) $(CXXFLAGS) -o engine main.cpp $(LDFLAGS)
+engine: $(SRC)
+	$(CXX) $(CXXFLAGS) -o engine $(SRC) $(LDFLAGS)
 
 clean:
 	rm -f engine
