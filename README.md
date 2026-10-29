@@ -1,6 +1,6 @@
 # Lua 3D Engine
 
-A lightweight 3D game engine written in C/C++ with integrated Lua scripting.
+A lightweight 3D game engine written in C/C++ with integrated Lua scripting and an Unreal-Engine-like ImGui editor.
 
 ## Requirements
 
@@ -10,11 +10,12 @@ To build and run this engine, you need the following dependencies:
 - Lua 5.4 (`liblua5.4-dev`)
 - SDL2 (`libsdl2-dev`)
 - OpenGL (`libgl1-mesa-dev`)
+- TinyGLTF (`libtinygltf-dev`)
 
 ### Ubuntu / Debian Installation
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential liblua5.4-dev libsdl2-dev libgl1-mesa-dev
+sudo apt-get install -y build-essential liblua5.4-dev libsdl2-dev libgl1-mesa-dev libtinygltf-dev nlohmann-json3-dev
 ```
 
 ## Building
@@ -32,3 +33,5 @@ After a successful build, start the engine by running:
 ## Features
 - Embedded Lua 5.4 engine for scripting.
 - Basic 3D rendering context using SDL2 and OpenGL.
+- Custom ImGui editor interface with docking.
+- GLB Export functionality.

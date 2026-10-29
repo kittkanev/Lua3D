@@ -9,10 +9,17 @@ extern "C" {
 #include <vector>
 #include <string>
 #include <cstring>
+#include <cmath>
 
 #include "imgui.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
+
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+// tinygltf requires json
+#include <tiny_gltf.h>
 
 // Basic GameObject structure
 struct GameObject {
@@ -27,8 +34,11 @@ struct GameObject {
 // Global state
 std::vector<GameObject> g_Objects;
 int g_SelectedObjectIndex = -1;
-char g_ScriptBuffer[1024 * 16] = "print('Hello from Lua!')\nadd_object('Scripted Cube')\n";
+char g_ScriptBuffer[1024 * 16] = "print('Hello from Lua!')\nadd_object('Scripted Cube')\nset_position(2, 10.0, 0.0, 0.0)\n--export_glb('scene.glb')\n";
 std::string g_ConsoleOutput = "";
+
+// Forward declarations
+static bool ExportGLB(const std::string& filename);
 
 // A simple C++ function to be called from Lua to print to the custom console
 static int l_print(lua_State *L) {
@@ -49,7 +59,81 @@ static int l_add_object(lua_State *L) {
     const char* name = luaL_checkstring(L, 1);
     g_Objects.emplace_back(name);
     g_ConsoleOutput += std::string("Added object via script: ") + name + "\n";
-    return 0; // Number of return values
+    return 0;
+}
+
+// Lua: set_position(index, x, y, z) - 0 based index
+static int l_set_position(lua_State *L) {
+    int index = luaL_checkinteger(L, 1);
+    if (index >= 0 && index < (int)g_Objects.size()) {
+        g_Objects[index].Position[0] = luaL_checknumber(L, 2);
+        g_Objects[index].Position[1] = luaL_checknumber(L, 3);
+        g_Objects[index].Position[2] = luaL_checknumber(L, 4);
+    }
+    return 0;
+}
+
+// Lua: export_glb(filename)
+static int l_export_glb(lua_State *L) {
+    const char* filename = luaL_checkstring(L, 1);
+    if (ExportGLB(filename)) {
+        g_ConsoleOutput += std::string("Successfully exported to ") + filename + "\n";
+    } else {
+        g_ConsoleOutput += std::string("Failed to export GLB to ") + filename + "\n";
+    }
+    return 0;
+}
+
+
+static bool ExportGLB(const std::string& filename) {
+    tinygltf::Model model;
+    tinygltf::Scene scene;
+
+    // Add nodes for all game objects
+    for (size_t i = 0; i < g_Objects.size(); i++) {
+        const auto& obj = g_Objects[i];
+        tinygltf::Node node;
+        node.name = obj.Name;
+
+        node.translation.push_back(obj.Position[0]);
+        node.translation.push_back(obj.Position[1]);
+        node.translation.push_back(obj.Position[2]);
+
+        node.scale.push_back(obj.Scale[0]);
+        node.scale.push_back(obj.Scale[1]);
+        node.scale.push_back(obj.Scale[2]);
+
+        // Convert euler to quaternion for tinygltf
+        // Very basic conversion (Y-up standard assumed, order XYZ for simplicity)
+        float cr = cos(obj.Rotation[0] * 0.5f);
+        float sr = sin(obj.Rotation[0] * 0.5f);
+        float cp = cos(obj.Rotation[1] * 0.5f);
+        float sp = sin(obj.Rotation[1] * 0.5f);
+        float cy = cos(obj.Rotation[2] * 0.5f);
+        float sy = sin(obj.Rotation[2] * 0.5f);
+
+        node.rotation.push_back(sr * cp * cy - cr * sp * sy); // x
+        node.rotation.push_back(cr * sp * cy + sr * cp * sy); // y
+        node.rotation.push_back(cr * cp * sy - sr * sp * cy); // z
+        node.rotation.push_back(cr * cp * cy + sr * sp * sy); // w
+
+        model.nodes.push_back(node);
+        scene.nodes.push_back(i); // add root nodes
+    }
+
+    model.scenes.push_back(scene);
+    model.defaultScene = 0;
+
+    // Asset info
+    tinygltf::Asset asset;
+    asset.version = "2.0";
+    asset.generator = "3D Lua Engine Editor";
+    model.asset = asset;
+
+    tinygltf::TinyGLTF gltf;
+    // Write out the glTF as a .glb (binary file)
+    bool ret = gltf.WriteGltfSceneToFile(&model, filename, true, true, true, false);
+    return ret;
 }
 
 int main(int argc, char* argv[]) {
@@ -124,9 +208,14 @@ int main(int argc, char* argv[]) {
     lua_pushcfunction(L, l_print);
     lua_setglobal(L, "print");
 
-    // Register add_object function to Lua
     lua_pushcfunction(L, l_add_object);
     lua_setglobal(L, "add_object");
+
+    lua_pushcfunction(L, l_set_position);
+    lua_setglobal(L, "set_position");
+
+    lua_pushcfunction(L, l_export_glb);
+    lua_setglobal(L, "export_glb");
 
     // Main loop flag
     bool quit = false;
@@ -134,7 +223,6 @@ int main(int argc, char* argv[]) {
     // Event handler
     SDL_Event e;
 
-    // We keep a flag to allow the test environment to automatically close it
     const char* env_timeout = std::getenv("TEST_TIMEOUT");
     Uint32 start_time = SDL_GetTicks();
     Uint32 timeout_ms = 0;
@@ -144,7 +232,6 @@ int main(int argc, char* argv[]) {
 
     // Main game loop
     while (!quit) {
-        // Test timeout
         if (timeout_ms > 0 && SDL_GetTicks() - start_time > timeout_ms) {
             quit = true;
         }
@@ -187,6 +274,13 @@ int main(int argc, char* argv[]) {
         // Menu Bar
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Export GLB")) {
+                    if (ExportGLB("export.glb")) {
+                        g_ConsoleOutput += "> Exported UI scene to export.glb\n";
+                    } else {
+                        g_ConsoleOutput += "> Failed to export GLB\n";
+                    }
+                }
                 if (ImGui::MenuItem("Exit")) quit = true;
                 ImGui::EndMenu();
             }
@@ -197,8 +291,6 @@ int main(int argc, char* argv[]) {
         // 1. Viewport Panel
         ImGui::Begin("Viewport");
         ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-        // Here we would normally render the framebuffer texture.
-        // For now, just a placeholder quad or text.
         ImGui::Text("3D Scene Viewport (%.0fx%.0f)", viewportPanelSize.x, viewportPanelSize.y);
         ImGui::End();
 
@@ -236,7 +328,7 @@ int main(int argc, char* argv[]) {
 
             ImGui::Separator();
             ImGui::DragFloat3("Position", obj.Position, 0.1f);
-            ImGui::DragFloat3("Rotation", obj.Rotation, 1.0f);
+            ImGui::DragFloat3("Rotation", obj.Rotation, 0.1f);
             ImGui::DragFloat3("Scale", obj.Scale, 0.1f);
         } else {
             ImGui::Text("Select an object in World Outliner.");
@@ -269,7 +361,6 @@ int main(int argc, char* argv[]) {
         ImGui::Text("Console Output:");
         ImGui::BeginChild("ConsoleScrollRegion", ImVec2(0, 0), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
         ImGui::TextUnformatted(g_ConsoleOutput.c_str());
-        // Auto-scroll
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
             ImGui::SetScrollHereY(1.0f);
         ImGui::EndChild();
@@ -280,11 +371,10 @@ int main(int argc, char* argv[]) {
         // Rendering
         ImGui::Render();
         glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-        glClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Darker blue-ish background for editor
+        glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        // Update and Render additional Platform Windows
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {
             SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
@@ -294,7 +384,6 @@ int main(int argc, char* argv[]) {
             SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
         }
 
-        // Update window
         SDL_GL_SwapWindow(window);
     }
 
