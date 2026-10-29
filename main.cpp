@@ -1,4 +1,4 @@
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include <GL/gl.h>
 extern "C" {
 #include <lua.h>
