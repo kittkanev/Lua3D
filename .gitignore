@@ -1,0 +1,9 @@
+engine
+lua-5.4.6/
+*.tar.gz
+*.zip
+SDL2-*/
+
+/tests/core_tests
+/tests/engine_tests
+/tests/test-scene.glb

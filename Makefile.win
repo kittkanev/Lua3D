@@ -1,0 +1,14 @@
+CXX = x86_64-w64-mingw32-g++
+CXXFLAGS = -Wall -std=c++11 -I./lua-5.4.6/src -I./SDL2-2.30.0/x86_64-w64-mingw32/include/SDL2 -I./imgui -I./imgui/backends -I./win_deps
+LDFLAGS = -L./lua-5.4.6/src -L./SDL2-2.30.0/x86_64-w64-mingw32/lib -llua -lmingw32 -lSDL2main -lSDL2 -lopengl32 -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
+
+IMGUI_SRC = imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
+SRC = main.cpp $(IMGUI_SRC)
+
+all: engine.exe
+
+engine.exe: $(SRC) scene_core.h
+	$(CXX) $(CXXFLAGS) -o engine.exe $(SRC) $(LDFLAGS)
+
+clean:
+	rm -f engine.exe
