@@ -27,6 +27,7 @@ extern "C" {
 
 #include "scene_core.h"
 #include <limits>
+#include <exception>
 static const size_t MAX_CONSOLE_LINES = 500;
 
 // Global state
@@ -149,6 +150,42 @@ private:
     lua_State* state_;
     int top_;
 };
+
+// Hooks bound accidental infinite loops in trusted editor scripts.
+static void LuaInstructionLimit(lua_State* L, lua_Debug*) {
+    luaL_error(L, "Lua instruction budget exceeded");
+}
+class LuaExecutionGuard {
+public:
+    explicit LuaExecutionGuard(lua_State* L)
+        : state_(L), previous_(lua_gethook(L)), mask_(lua_gethookmask(L)), count_(lua_gethookcount(L)) {
+        lua_sethook(L, LuaInstructionLimit, LUA_MASKCOUNT, 1000000);
+    }
+    ~LuaExecutionGuard() { lua_sethook(state_, previous_, mask_, count_); }
+    LuaExecutionGuard(const LuaExecutionGuard&) = delete;
+    LuaExecutionGuard& operator=(const LuaExecutionGuard&) = delete;
+private:
+    lua_State* state_;
+    lua_Hook previous_;
+    int mask_;
+    int count_;
+};
+
+// C++ exceptions must not unwind through the Lua C runtime.
+template<int (*Function)(lua_State*)>
+static int LuaBinding(lua_State* L) {
+    char message[512] = {};
+    try {
+        return Function(L);
+    } catch (const std::exception& error) {
+        std::snprintf(message, sizeof(message), "Native API error: %s", error.what());
+    } catch (...) {
+        std::snprintf(message, sizeof(message), "Native API error: unknown exception");
+    }
+    // The exception object has been destroyed before Lua may longjmp.
+    lua_pushstring(L, message);
+    return lua_error(L);
+}
 
 static void ClearUpdateCallback(lua_State* L) {
     lua_pushglobaltable(L);
@@ -456,29 +493,29 @@ static void InitLuaState() {
     g_LuaState = luaL_newstate();
     if (!g_LuaState) throw std::bad_alloc();
     luaL_openlibs(g_LuaState);
-    lua_register(g_LuaState, "duplicate_object", l_duplicate_object);
-    lua_register(g_LuaState, "set_name", l_set_name);
-    lua_register(g_LuaState, "set_material", l_set_material);
-    lua_register(g_LuaState, "get_material", l_get_material);
+    lua_register(g_LuaState, "duplicate_object", LuaBinding<l_duplicate_object>);
+    lua_register(g_LuaState, "set_name", LuaBinding<l_set_name>);
+    lua_register(g_LuaState, "set_material", LuaBinding<l_set_material>);
+    lua_register(g_LuaState, "get_material", LuaBinding<l_get_material>);
 
-    lua_register(g_LuaState, "print",            l_print);
-    lua_register(g_LuaState, "add_object",       l_add_object);
-    lua_register(g_LuaState, "remove_object",    l_remove_object);
-    lua_register(g_LuaState, "clear_scene",      l_clear_scene);
-    lua_register(g_LuaState, "find_object",      l_find_object);
-    lua_register(g_LuaState, "set_position",     l_set_position);
-    lua_register(g_LuaState, "get_position",     l_get_position);
-    lua_register(g_LuaState, "set_rotation",     l_set_rotation);
-    lua_register(g_LuaState, "get_rotation",     l_get_rotation);
-    lua_register(g_LuaState, "set_scale",        l_set_scale);
-    lua_register(g_LuaState, "get_scale",        l_get_scale);
-    lua_register(g_LuaState, "set_color",        l_set_color);
-    lua_register(g_LuaState, "get_color",        l_get_color);
-    lua_register(g_LuaState, "set_visible",      l_set_visible);
-    lua_register(g_LuaState, "set_wireframe",    l_set_wireframe);
-    lua_register(g_LuaState, "get_object_count", l_get_object_count);
-    lua_register(g_LuaState, "get_time",         l_get_time);
-    lua_register(g_LuaState, "export_glb",       l_export_glb);
+    lua_register(g_LuaState, "print",            LuaBinding<l_print>);
+    lua_register(g_LuaState, "add_object",       LuaBinding<l_add_object>);
+    lua_register(g_LuaState, "remove_object",    LuaBinding<l_remove_object>);
+    lua_register(g_LuaState, "clear_scene",      LuaBinding<l_clear_scene>);
+    lua_register(g_LuaState, "find_object",      LuaBinding<l_find_object>);
+    lua_register(g_LuaState, "set_position",     LuaBinding<l_set_position>);
+    lua_register(g_LuaState, "get_position",     LuaBinding<l_get_position>);
+    lua_register(g_LuaState, "set_rotation",     LuaBinding<l_set_rotation>);
+    lua_register(g_LuaState, "get_rotation",     LuaBinding<l_get_rotation>);
+    lua_register(g_LuaState, "set_scale",        LuaBinding<l_set_scale>);
+    lua_register(g_LuaState, "get_scale",        LuaBinding<l_get_scale>);
+    lua_register(g_LuaState, "set_color",        LuaBinding<l_set_color>);
+    lua_register(g_LuaState, "get_color",        LuaBinding<l_get_color>);
+    lua_register(g_LuaState, "set_visible",      LuaBinding<l_set_visible>);
+    lua_register(g_LuaState, "set_wireframe",    LuaBinding<l_set_wireframe>);
+    lua_register(g_LuaState, "get_object_count", LuaBinding<l_get_object_count>);
+    lua_register(g_LuaState, "get_time",         LuaBinding<l_get_time>);
+    lua_register(g_LuaState, "export_glb",       LuaBinding<l_export_glb>);
 }
 
 static void ShutdownLuaState() {
@@ -496,6 +533,7 @@ static void ExecuteLuaScript(const char* script) {
     AppendConsole("> Running Lua Script...\n");
     LuaStackGuard guard(g_LuaState);
     ClearUpdateCallback(g_LuaState);
+    LuaExecutionGuard execution(g_LuaState);
     if (luaL_dostring(g_LuaState, script) != LUA_OK) {
         ClearUpdateCallback(g_LuaState);
         const std::string err = LuaErrorText(g_LuaState);
@@ -508,6 +546,7 @@ static void UpdateLuaScript(float dt) {
     LuaStackGuard guard(g_LuaState);
     PushUpdateCallback(g_LuaState);
     if (lua_isfunction(g_LuaState, -1)) {
+        LuaExecutionGuard execution(g_LuaState);
         lua_pushnumber(g_LuaState, dt);
         if (lua_pcall(g_LuaState, 1, 0, 0) != LUA_OK) {
             const std::string err = LuaErrorText(g_LuaState);
@@ -865,6 +904,7 @@ static bool ExportGLB(const std::string& filename) {
 
 int main(int argc, char* argv[]) {
     (void)argc; (void)argv;
+    SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
         return 1;
@@ -915,18 +955,8 @@ int main(int argc, char* argv[]) {
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
 
-    // Fixes Bug #11: Safe 64-bit parsing of TEST_TIMEOUT (in seconds) without signed int overflow
-    const char* env_timeout = std::getenv("TEST_TIMEOUT");
-    Uint32 start_time = SDL_GetTicks();
-    uint64_t timeout_ms = 0;
-    if (env_timeout != nullptr && *env_timeout != '\0') {
-        char* endptr = nullptr;
-        unsigned long long secs = std::strtoull(env_timeout, &endptr, 10);
-        if (endptr != env_timeout && secs > 0) {
-            const unsigned long long max_secs = 3600000ULL;
-            timeout_ms = (secs > max_secs) ? (max_secs * 1000ULL) : (secs * 1000ULL);
-        }
-    }
+    const Uint32 start_time = SDL_GetTicks();
+    const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
 
     bool done = false;
     float cameraDistance = 10.0f;
@@ -939,7 +969,7 @@ int main(int argc, char* argv[]) {
     while (!done) {
         Uint32 currentTicks = SDL_GetTicks();
         if (timeout_ms > 0 && (uint64_t)(currentTicks - start_time) >= timeout_ms) {
-            done = true;
+            break;
         }
 
         float dt = (float)(currentTicks - lastTicks) / 1000.0f;

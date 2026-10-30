@@ -4,7 +4,8 @@ permissions:
   contents: read
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
@@ -12,6 +13,60 @@ jobs:
       - name: Test geometry and scene operations
         run: make test
       - name: Build editor and integration tests
-        run: make -j2 engine test-integration
-      - name: Smoke test editor
+        run: KEEP_TEST_GLB=1 make -j2 engine test-integration
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/package-lock.json
+      - name: Validate binary glTF independently
+        run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb
+      - name: Smoke test editor and timeout
         run: timeout 30s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 ./engine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gltf-validation
+          path: tests/test-scene.glb.validation.json
+      - name: Address, undefined behavior and leak checks
+        run: |
+          make clean
+          make -j2 test-integration EXTRA_CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' EXTRA_LDFLAGS='-fsanitize=address,undefined'
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+  mingw:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+      - name: Prepare verified Lua and SDL2 dependencies
+        run: bash tools/prepare_mingw.sh
+      - name: Build editor and Windows tests
+        run: make -j2 -f Makefile.win package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lua3d-windows-x64
+          path: |
+            build/win/*.exe
+            build/win/SDL2.dll
+            build/win/README.md
+            build/win/examples/
+            build/win/docs/
+  windows:
+    runs-on: windows-2022
+    needs: mingw
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lua3d-windows-x64
+      - name: Run MinGW binaries on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tests | Out-Null
+          & ./core_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./engine_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

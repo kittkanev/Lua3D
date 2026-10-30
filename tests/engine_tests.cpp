@@ -3,6 +3,7 @@
 #undef main
 #include <cassert>
 #include <fstream>
+#include <stdexcept>
 
 static void CheckLua(const char* script) {
     const int top = lua_gettop(g_LuaState);
@@ -12,8 +13,18 @@ static void CheckLua(const char* script) {
     }
     assert(lua_gettop(g_LuaState) == top);
 }
+static int ThrowingBinding(lua_State*) { throw std::runtime_error("test exception"); }
 int main() {
     InitLuaState();
+    lua_register(g_LuaState, "throw_native", LuaBinding<ThrowingBinding>);
+    CheckLua("local ok,e=pcall(throw_native); assert(not ok and e:find('test exception'))");
+    ExecuteLuaScript("while true do end");
+    assert(lua_gettop(g_LuaState) == 0);
+    assert(g_ConsoleOutput.find("instruction budget exceeded") != std::string::npos);
+    ExecuteLuaScript("function on_update(dt) while true do end end");
+    UpdateLuaScript(0.01f);
+    assert(!g_SimulationRunning && lua_gettop(g_LuaState) == 0);
+    g_SimulationRunning = true;
     CheckLua(R"(
         local a = add_object('original', 'sphere')
         assert(a == 0)
@@ -91,7 +102,13 @@ int main() {
         assert(std::memcmp(model.buffers[0].data.data()+pv.byteOffset, vertices.data(), vertices.size()*sizeof(float)) == 0);
         assert(std::memcmp(model.buffers[0].data.data()+iv.byteOffset, indices.data(), indices.size()*sizeof(uint16_t)) == 0);
     }
-    std::remove("tests/test-scene.glb");
+    if (!std::getenv("KEEP_TEST_GLB")) std::remove("tests/test-scene.glb");
     ShutdownLuaState();
+    for (int run = 0; run < 50; ++run) {
+        InitLuaState();
+        ExecuteLuaScript("local x = {}; for i=1,100 do x[i]=string.rep('x',100) end");
+        assert(lua_gettop(g_LuaState) == 0);
+        ShutdownLuaState();
+    }
     std::cout << "PASS: Lua bounds, stack recovery, hostile metamethods, GLB buffer round trip\n";
 }
