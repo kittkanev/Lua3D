@@ -36,6 +36,8 @@ package: all tests
 	cp $(SDL_DIR)/bin/SDL2.dll $(BUILD_DIR)/
 	cp README.md $(BUILD_DIR)/
 	cp -r examples docs $(BUILD_DIR)/
+	mkdir -p $(BUILD_DIR)/licenses
+	cp docs/licenses/* $(BUILD_DIR)/licenses/
 
 -include $(DEPS)
 

@@ -43,5 +43,5 @@ tests/core_tests: tests/core_tests.cpp scene_core.h
 test-integration: tests/engine_tests
 	./tests/engine_tests
 
-tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h $(filter-out main.o,$(OBJS))
+tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h engine_version.h $(filter-out main.o,$(OBJS))
 	$(CXX) $(CXXFLAGS) tests/engine_tests.cpp $(filter-out main.o,$(OBJS)) -o $@ $(LDFLAGS)

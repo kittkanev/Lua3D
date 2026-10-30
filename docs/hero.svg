@@ -4,7 +4,7 @@
 <g stroke="#253654" stroke-width="1" opacity=".6"><path d="M0 240H1200M0 270H1200M800 0V300M900 0V300M1000 0V300M1100 0V300"/></g>
 <g transform="translate(944 145)" stroke="url(#blue)" stroke-width="3" stroke-linejoin="round"><path d="M0-85 82-38 82 55 0 102-82 55-82-38Z" fill="#172c49"/><path d="M-82-38 0 9 82-38M0 9V102M0-85V9" fill="none"/><circle cy="9" r="7" fill="#75e5e0" stroke="none"/></g>
 <text x="64" y="77" fill="#8fa9c9" font-family="Arial,sans-serif" font-size="14" letter-spacing="4">SCRIPT · SHAPE · EXPORT</text>
-<text x="60" y="166" fill="#edf5ff" font-family="Arial,sans-serif" font-size="84" font-weight="700" letter-spacing="-3">Lua<tspan fill="#75dada">3D</tspan></text>
+<text x="60" y="166" fill="#edf5ff" font-family="Arial,sans-serif" font-size="84" font-weight="700" letter-spacing="-3">Lunor<tspan fill="#75dada">yx</tspan></text>
 <text x="64" y="212" fill="#b6c6dd" font-family="Arial,sans-serif" font-size="22">A compact 3D playground. A native C++ core.</text>
 <text x="64" y="260" fill="#7794b9" font-family="Arial,sans-serif" font-size="15">LUA 5.4  /  SDL2  /  OPENGL  /  DEAR IMGUI  /  GLB 2.0</text>
 </svg>

@@ -26,6 +26,7 @@ extern "C" {
 #include <tiny_gltf.h>
 
 #include "scene_core.h"
+#include "engine_version.h"
 #include <limits>
 #include <exception>
 static const size_t MAX_CONSOLE_LINES = 500;
@@ -46,7 +47,7 @@ std::vector<std::string> g_ConsoleLines;
 std::string g_ConsoleOutput = "";
 
 char g_ScriptBuffer[1024 * 16] =
-    "-- Lua 3D Engine: Interactive Demo Script\n"
+    "-- Lunoryx: Interactive Demo Script\n"
     "print('Initializing procedural scene...', true, nil)\n"
     "clear_scene()\n\n"
     "local sun = add_object('Sun', 'sphere')\n"
@@ -778,11 +779,11 @@ static void RenderGrid() {
 static bool ExportGLB(const std::string& filename) {
     tinygltf::Model model;
     tinygltf::Scene scene;
-    scene.name = "Lua3D Scene";
+    scene.name = LUNORYX_NAME " Scene";
 
     tinygltf::Asset asset;
     asset.version = "2.0";
-    asset.generator = "3D Lua Engine Editor";
+    asset.generator = LUNORYX_NAME " " LUNORYX_VERSION;
     model.asset = asset;
 
     int posAccessorByType[5] = {-1, -1, -1, -1, -1};
@@ -921,7 +922,7 @@ int main(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_Window* window = SDL_CreateWindow("3D Lua Engine Editor", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 800, window_flags);
+    SDL_Window* window = SDL_CreateWindow(LUNORYX_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 800, window_flags);
     if (!window) {
         std::cerr << "Error creating SDL Window: " << SDL_GetError() << std::endl;
         SDL_Quit();

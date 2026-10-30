@@ -1,0 +1,54 @@
+name: Publish first Lunoryx prerelease
+on:
+  workflow_run:
+    workflows: [Build and tests]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: lunoryx-first-prerelease
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: ${{ github.event.workflow_run.id }}
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      RELEASE_TAG: v0.1.0-alpha.1
+      RELEASE_TITLE: Lunoryx v0.1.0-alpha.1 — Early Test Release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Check publication state
+        id: state
+        run: |
+          state=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)
+          if [ "$state" = false ]; then
+            echo 'published=true' >> "$GITHUB_OUTPUT"
+          elif [ "$state" = true ]; then
+            echo 'draft=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the tested Windows artifact
+        if: steps.state.outputs.published != 'true'
+        run: gh run download "$SOURCE_RUN" --name lua3d-windows-x64 --dir build/artifact
+      - name: Package executable, instructions and licenses
+        if: steps.state.outputs.published != 'true'
+        run: python tools/package_release.py --artifact-dir build/artifact --output-dir build/release
+      - name: Create draft and upload verified files
+        if: steps.state.outputs.published != 'true'
+        run: |
+          if [ '${{ steps.state.outputs.draft }}' != true ]; then
+            gh release create "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TITLE" --notes-file docs/release-notes-v0.1.0-alpha.1.md --prerelease --draft
+          fi
+          gh release upload "$RELEASE_TAG" build/release/Lunoryx-v0.1.0-alpha.1-windows-x64.zip build/release/Lunoryx.exe build/release/SDL2.dll build/release/SHA256SUMS.txt --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+      - name: Verify published prerelease
+        run: |
+          gh release view "$RELEASE_TAG" --json url,isDraft,isPrerelease,targetCommitish,assets

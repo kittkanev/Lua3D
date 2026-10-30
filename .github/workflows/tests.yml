@@ -54,6 +54,7 @@ jobs:
             build/win/README.md
             build/win/examples/
             build/win/docs/
+            build/win/licenses/
   windows:
     runs-on: windows-2022
     needs: mingw

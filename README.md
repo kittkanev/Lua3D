@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/hero.svg" alt="Lua3D — Script, shape, export" width="100%" />
+  <img src="docs/hero.svg" alt="Lunoryx — Script, shape, export" width="100%" />
 </p>
 
 <p align="center">
@@ -17,7 +17,13 @@
   <a href="#архитектура">Архитектура</a>
 </p>
 
-Lua3D — небольшой настольный 3D-редактор на C++ с Lua 5.4, OpenGL и Dear ImGui.
+> **Ранняя тестовая версия · v0.1.0-alpha.1**
+> Возможны баги, нестабильная работа и потеря несохранённых изменений.
+> Выпуск предназначен для знакомства и тестирования. Сохраняйте резервные копии важных файлов.
+>
+> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.1.0-alpha.1)** — архив содержит `Lunoryx.exe` и необходимую `SDL2.dll`.
+
+**Lunoryx** (ранее Lua3D) — небольшой настольный 3D-редактор на C++ с Lua 5.4, OpenGL и Dear ImGui.
 Сцена редактируется через инспектор или скрипт; `on_update(dt)` позволяет анимировать объекты без пересборки приложения.
 
 | Создание сцены | Редактирование | Экспорт |
@@ -45,11 +51,13 @@ make -j2
 
 ### Windows · готовая сборка
 
-Открой успешный запуск [Build and tests](https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml?query=branch%3Amain)
-и скачай артефакт **`lua3d-windows-x64`**. Распакуй архив и запусти `engine.exe`.
-Файл `SDL2.dll` должен оставаться рядом с приложением. GitHub может потребовать вход для скачивания артефактов.
+Скачай **`Lunoryx-v0.1.0-alpha.1-windows-x64.zip`** со страницы
+[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.1.0-alpha.1).
+Распакуй архив целиком и запусти **`Lunoryx.exe`**. `SDL2.dll` должна находиться рядом с приложением.
+В архив включены пример Lua, инструкция и лицензии сторонних компонентов.
 
-Бинарные файлы создаются CI из текущего исходного кода; старые исполняемые файлы в репозитории не используются.
+Актуальные сборки из `main` также доступны как артефакт `lua3d-windows-x64`
+в [Build and tests](https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml?query=branch%3Amain).
 
 ### Windows · кросс-компиляция на Linux
 
@@ -197,7 +205,7 @@ xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 ./engine
 
 ## Границы текущей версии
 
-Lua3D использует фиксированный OpenGL-пайплайн с простым затенением граней. PBR-факторы сохраняются в GLB;
+Lunoryx использует фиксированный OpenGL-пайплайн с простым затенением граней. PBR-факторы сохраняются в GLB;
 viewport не является физически корректным PBR-рендерером. Импорт внешних мешей, текстуры, физика,
 undo/redo и полноценное сохранение проекта пока не реализованы. GLB сохраняет видимую геометрию и материалы,
 но не Lua-код, анимационные callbacks, wireframe и раскладку редактора.
@@ -216,7 +224,7 @@ undo/redo и полноценное сохранение проекта пока
 - [nlohmann/json](https://github.com/nlohmann/json) — MIT.
 - [stb](https://github.com/nothings/stb) — MIT или public domain.
 
-Лицензии сторонних компонентов действуют отдельно. Лицензия на собственный код Lua3D
+Лицензии сторонних компонентов действуют отдельно. Лицензия на собственный код Lunoryx
 пока не указана владельцем репозитория.
 
 </details>
