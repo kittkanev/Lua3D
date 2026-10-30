@@ -26,4 +26,19 @@ engine: $(OBJS)
 -include $(DEPS)
 
 clean:
-	rm -f engine $(OBJS) $(DEPS) *.glb
+	rm -f engine $(OBJS) $(DEPS) tests/core_tests tests/engine_tests
+
+
+.PHONY: all clean test test-integration
+
+test: tests/core_tests
+	./tests/core_tests
+
+tests/core_tests: tests/core_tests.cpp scene_core.h
+	$(CXX) -std=c++11 -Wall -Wextra -pedantic -O2 $< -o $@
+
+test-integration: tests/engine_tests
+	./tests/engine_tests
+
+tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h $(filter-out main.o,$(OBJS))
+	$(CXX) $(CXXFLAGS) tests/engine_tests.cpp $(filter-out main.o,$(OBJS)) -o $@ $(LDFLAGS)

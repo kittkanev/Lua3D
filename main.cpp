@@ -25,56 +25,9 @@ extern "C" {
 // tinygltf requires json
 #include <tiny_gltf.h>
 
-static const float PI = 3.14159265358979323846f;
+#include "scene_core.h"
+#include <limits>
 static const size_t MAX_CONSOLE_LINES = 500;
-
-enum class MeshType : int {
-    Cube = 0,
-    Pyramid = 1,
-    Sphere = 2,
-    Cylinder = 3,
-    Plane = 4
-};
-
-static const char* GetMeshTypeName(MeshType type) {
-    switch (type) {
-        case MeshType::Cube:     return "Cube";
-        case MeshType::Pyramid:  return "Pyramid";
-        case MeshType::Sphere:   return "Sphere";
-        case MeshType::Cylinder: return "Cylinder";
-        case MeshType::Plane:    return "Plane";
-        default:                 return "Cube";
-    }
-}
-
-static MeshType ParseMeshType(const std::string& typeStr) {
-    std::string lower = typeStr;
-    for (char& c : lower) {
-        if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
-    }
-    if (lower == "pyramid")  return MeshType::Pyramid;
-    if (lower == "sphere")   return MeshType::Sphere;
-    if (lower == "cylinder") return MeshType::Cylinder;
-    if (lower == "plane")    return MeshType::Plane;
-    return MeshType::Cube;
-}
-
-// Enhanced GameObject structure (Rotation is stored in degrees for UI clarity and converted to radians on GLB export)
-struct GameObject {
-    std::string Name;
-    MeshType Type = MeshType::Cube;
-    float Position[3] = {0.0f, 0.0f, 0.0f};
-    float Rotation[3] = {0.0f, 0.0f, 0.0f}; // Degrees (X, Y, Z)
-    float Scale[3]    = {1.0f, 1.0f, 1.0f};
-    float Color[3]    = {0.80f, 0.45f, 0.20f};
-    float Metallic    = 0.1f;
-    float Roughness   = 0.5f;
-    bool Visible      = true;
-    bool Wireframe    = false;
-
-    GameObject(const std::string& name, MeshType type = MeshType::Cube)
-        : Name(name), Type(type) {}
-};
 
 // Global state
 std::vector<GameObject> g_Objects;
@@ -171,6 +124,19 @@ static int l_print(lua_State *L) {
     return 0;
 }
 
+static float CheckFiniteNumber(lua_State* L, int argument) {
+    const lua_Number value = luaL_checknumber(L, argument);
+    if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+        luaL_argerror(L, argument, "expected a finite float");
+    return static_cast<float>(value);
+}
+
+// Never invoke an error object's __tostring metamethod outside a protected call.
+static std::string LuaErrorText(lua_State* L) {
+    const char* message = lua_tostring(L, -1);
+    return message ? message : luaL_typename(L, -1);
+}
+
 // Lua: add_object(name, [type]) -> index (0-based)
 static int l_add_object(lua_State *L) {
     const char* name = luaL_checkstring(L, 1);
@@ -187,7 +153,7 @@ static int l_add_object(lua_State *L) {
 
 // Lua: remove_object(index) -> bool
 static int l_remove_object(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects.erase(g_Objects.begin() + index);
         if (g_SelectedObjectIndex == index) {
@@ -226,10 +192,10 @@ static int l_find_object(lua_State *L) {
 
 // Lua: set_position(index, x, y, z) - 0-based index (Fixes Bug #6: reports out-of-bounds index)
 static int l_set_position(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
-    float x = (float)luaL_checknumber(L, 2);
-    float y = (float)luaL_checknumber(L, 3);
-    float z = (float)luaL_checknumber(L, 4);
+    lua_Integer index = luaL_checkinteger(L, 1);
+    float x = CheckFiniteNumber(L, 2);
+    float y = CheckFiniteNumber(L, 3);
+    float z = CheckFiniteNumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Position[0] = x;
         g_Objects[index].Position[1] = y;
@@ -246,7 +212,7 @@ static int l_set_position(lua_State *L) {
 
 // Lua: get_position(index) -> x, y, z
 static int l_get_position(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         lua_pushnumber(L, g_Objects[index].Position[0]);
         lua_pushnumber(L, g_Objects[index].Position[1]);
@@ -259,10 +225,10 @@ static int l_get_position(lua_State *L) {
 
 // Lua: set_rotation(index, rx_deg, ry_deg, rz_deg)
 static int l_set_rotation(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
-    float rx = (float)luaL_checknumber(L, 2);
-    float ry = (float)luaL_checknumber(L, 3);
-    float rz = (float)luaL_checknumber(L, 4);
+    lua_Integer index = luaL_checkinteger(L, 1);
+    float rx = CheckFiniteNumber(L, 2);
+    float ry = CheckFiniteNumber(L, 3);
+    float rz = CheckFiniteNumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Rotation[0] = rx;
         g_Objects[index].Rotation[1] = ry;
@@ -277,7 +243,7 @@ static int l_set_rotation(lua_State *L) {
 
 // Lua: get_rotation(index) -> rx, ry, rz
 static int l_get_rotation(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         lua_pushnumber(L, g_Objects[index].Rotation[0]);
         lua_pushnumber(L, g_Objects[index].Rotation[1]);
@@ -290,10 +256,10 @@ static int l_get_rotation(lua_State *L) {
 
 // Lua: set_scale(index, sx, sy, sz)
 static int l_set_scale(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
-    float sx = (float)luaL_checknumber(L, 2);
-    float sy = (float)luaL_checknumber(L, 3);
-    float sz = (float)luaL_checknumber(L, 4);
+    lua_Integer index = luaL_checkinteger(L, 1);
+    float sx = CheckFiniteNumber(L, 2);
+    float sy = CheckFiniteNumber(L, 3);
+    float sz = CheckFiniteNumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Scale[0] = sx;
         g_Objects[index].Scale[1] = sy;
@@ -308,7 +274,7 @@ static int l_set_scale(lua_State *L) {
 
 // Lua: get_scale(index) -> sx, sy, sz
 static int l_get_scale(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         lua_pushnumber(L, g_Objects[index].Scale[0]);
         lua_pushnumber(L, g_Objects[index].Scale[1]);
@@ -321,10 +287,10 @@ static int l_get_scale(lua_State *L) {
 
 // Lua: set_color(index, r, g, b)
 static int l_set_color(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
-    float r = (float)luaL_checknumber(L, 2);
-    float g = (float)luaL_checknumber(L, 3);
-    float b = (float)luaL_checknumber(L, 4);
+    lua_Integer index = luaL_checkinteger(L, 1);
+    float r = CheckFiniteNumber(L, 2);
+    float g = CheckFiniteNumber(L, 3);
+    float b = CheckFiniteNumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Color[0] = std::max(0.0f, std::min(1.0f, r));
         g_Objects[index].Color[1] = std::max(0.0f, std::min(1.0f, g));
@@ -339,7 +305,7 @@ static int l_set_color(lua_State *L) {
 
 // Lua: get_color(index) -> r, g, b
 static int l_get_color(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         lua_pushnumber(L, g_Objects[index].Color[0]);
         lua_pushnumber(L, g_Objects[index].Color[1]);
@@ -352,7 +318,7 @@ static int l_get_color(lua_State *L) {
 
 // Lua: set_visible(index, visible)
 static int l_set_visible(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Visible = lua_toboolean(L, 2) != 0;
         lua_pushboolean(L, 1);
@@ -365,7 +331,7 @@ static int l_set_visible(lua_State *L) {
 
 // Lua: set_wireframe(index, wireframe)
 static int l_set_wireframe(lua_State *L) {
-    int index = (int)luaL_checkinteger(L, 1);
+    lua_Integer index = luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Wireframe = lua_toboolean(L, 2) != 0;
         lua_pushboolean(L, 1);
@@ -401,10 +367,58 @@ static int l_export_glb(lua_State *L) {
     return 1;
 }
 
+// Lua: duplicate_object(index [, name]) -> new index, or -1.
+static int l_duplicate_object(lua_State* L) {
+    lua_Integer index = luaL_checkinteger(L, 1);
+    const char* name = luaL_optstring(L, 2, nullptr);
+    if (index < 0 || index >= static_cast<lua_Integer>(g_Objects.size())) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    lua_pushinteger(L, DuplicateObject(g_Objects, static_cast<int>(index),
+        name ? std::string(name) : g_Objects[index].Name + " Copy"));
+    return 1;
+}
+
+static int l_set_name(lua_State* L) {
+    lua_Integer index = luaL_checkinteger(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+    bool valid = index >= 0 && index < static_cast<lua_Integer>(g_Objects.size());
+    if (valid) g_Objects[index].Name = name;
+    lua_pushboolean(L, valid);
+    return 1;
+}
+
+static int l_set_material(lua_State* L) {
+    lua_Integer index = luaL_checkinteger(L, 1);
+    float metallic = CheckFiniteNumber(L, 2);
+    float roughness = CheckFiniteNumber(L, 3);
+    bool valid = index >= 0 && index < static_cast<lua_Integer>(g_Objects.size());
+    if (valid) {
+        g_Objects[index].Metallic = std::max(0.0f, std::min(1.0f, metallic));
+        g_Objects[index].Roughness = std::max(0.0f, std::min(1.0f, roughness));
+    }
+    lua_pushboolean(L, valid);
+    return 1;
+}
+
+static int l_get_material(lua_State* L) {
+    lua_Integer index = luaL_checkinteger(L, 1);
+    if (index < 0 || index >= static_cast<lua_Integer>(g_Objects.size())) return 0;
+    lua_pushnumber(L, g_Objects[index].Metallic);
+    lua_pushnumber(L, g_Objects[index].Roughness);
+    return 2;
+}
+
 static void InitLuaState() {
     ShutdownLuaState();
     g_LuaState = luaL_newstate();
+    if (!g_LuaState) throw std::bad_alloc();
     luaL_openlibs(g_LuaState);
+    lua_register(g_LuaState, "duplicate_object", l_duplicate_object);
+    lua_register(g_LuaState, "set_name", l_set_name);
+    lua_register(g_LuaState, "set_material", l_set_material);
+    lua_register(g_LuaState, "get_material", l_get_material);
 
     lua_register(g_LuaState, "print",            l_print);
     lua_register(g_LuaState, "add_object",       l_add_object);
@@ -440,9 +454,13 @@ static void ExecuteLuaScript(const char* script) {
     }
     AppendConsole("> Running Lua Script...\n");
     int topBefore = lua_gettop(g_LuaState);
+    lua_pushnil(g_LuaState);
+    lua_setglobal(g_LuaState, "on_update");
     if (luaL_dostring(g_LuaState, script) != LUA_OK) {
-        const char *err = luaL_tolstring(g_LuaState, -1, nullptr);
-        AppendConsole(std::string("Lua Error: ") + (err ? err : "Unknown error") + "\n");
+        lua_pushnil(g_LuaState);
+        lua_setglobal(g_LuaState, "on_update");
+        const std::string err = LuaErrorText(g_LuaState);
+        AppendConsole(std::string("Lua Error: ") + err + "\n");
     }
     // Restore stack top so return values or error objects never accumulate on the stack
     lua_settop(g_LuaState, topBefore);
@@ -455,8 +473,8 @@ static void UpdateLuaScript(float dt) {
     if (lua_isfunction(g_LuaState, -1)) {
         lua_pushnumber(g_LuaState, dt);
         if (lua_pcall(g_LuaState, 1, 0, 0) != LUA_OK) {
-            const char *err = luaL_tolstring(g_LuaState, -1, nullptr);
-            AppendConsole(std::string("Lua on_update Error: ") + (err ? err : "Unknown error") + "\n");
+            const std::string err = LuaErrorText(g_LuaState);
+            AppendConsole(std::string("Lua on_update Error: ") + err + "\n");
             g_SimulationRunning = false; // pause on runtime error to prevent log spam
         }
     }
@@ -681,123 +699,6 @@ static void RenderGrid() {
     glEnd();
 }
 
-// Fixes Bug #2: converts UI degrees to radians before computing quaternion (intrinsic XYZ / Qx * Qy * Qz matching glRotatef order)
-static std::vector<double> EulerDegreesToQuaternion(float rxDeg, float ryDeg, float rzDeg) {
-    const double degToRad = PI / 180.0;
-    double hx = (rxDeg * degToRad) * 0.5;
-    double hy = (ryDeg * degToRad) * 0.5;
-    double hz = (rzDeg * degToRad) * 0.5;
-
-    double cx = std::cos(hx), sx = std::sin(hx);
-    double cy = std::cos(hy), sy = std::sin(hy);
-    double cz = std::cos(hz), sz = std::sin(hz);
-
-    // Quaternion product Q = Qx * Qy * Qz (matches OpenGL glRotatef(rx,1,0,0) * glRotatef(ry,0,1,0) * glRotatef(rz,0,0,1))
-    double qw = cx * cy * cz - sx * sy * sz;
-    double qx = sx * cy * cz + cx * sy * sz;
-    double qy = cx * sy * cz - sx * cy * sz;
-    double qz = cx * cy * sz + sx * sy * cz;
-
-    return {qx, qy, qz, qw};
-}
-
-// Generate vertex positions and triangle indices for any MeshType for GLB export
-static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPositions, std::vector<uint16_t>& outIndices) {
-    outPositions.clear();
-    outIndices.clear();
-
-    if (type == MeshType::Cube) {
-        outPositions = {
-            -0.5f, -0.5f,  0.5f, // 0: Front-Bottom-Left
-             0.5f, -0.5f,  0.5f, // 1: Front-Bottom-Right
-             0.5f,  0.5f,  0.5f, // 2: Front-Top-Right
-            -0.5f,  0.5f,  0.5f, // 3: Front-Top-Left
-            -0.5f, -0.5f, -0.5f, // 4: Back-Bottom-Left
-            -0.5f,  0.5f, -0.5f, // 5: Back-Top-Left
-             0.5f,  0.5f, -0.5f, // 6: Back-Top-Right
-             0.5f, -0.5f, -0.5f  // 7: Back-Bottom-Right
-        };
-        outIndices = {
-            0, 1, 2,  0, 2, 3, // Front  (+Z)
-            7, 4, 5,  7, 5, 6, // Back   (-Z)
-            3, 2, 6,  3, 6, 5, // Top    (+Y)
-            4, 0, 3,  4, 3, 5, // Left   (-X)
-            1, 7, 6,  1, 6, 2, // Right  (+X)
-            4, 7, 1,  4, 1, 0  // Bottom (-Y)
-        };
-    } else if (type == MeshType::Pyramid) {
-        outPositions = {
-             0.0f,  0.5f,  0.0f, // 0: Apex
-            -0.5f, -0.5f,  0.5f, // 1: Front-Left
-             0.5f, -0.5f,  0.5f, // 2: Front-Right
-             0.5f, -0.5f, -0.5f, // 3: Back-Right
-            -0.5f, -0.5f, -0.5f  // 4: Back-Left
-        };
-        outIndices = {
-            0, 1, 2, // Front
-            0, 2, 3, // Right
-            0, 3, 4, // Back
-            0, 4, 1, // Left
-            4, 3, 2,  4, 2, 1 // Base
-        };
-    } else if (type == MeshType::Plane) {
-        outPositions = {
-            -0.5f, 0.0f,  0.5f,
-             0.5f, 0.0f,  0.5f,
-             0.5f, 0.0f, -0.5f,
-            -0.5f, 0.0f, -0.5f
-        };
-        outIndices = { 0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2 };
-    } else if (type == MeshType::Sphere) {
-        const int rings = 12;
-        const int sectors = 16;
-        const float radius = 0.5f;
-        for (int r = 0; r <= rings; ++r) {
-            float theta = (float)r / rings * PI;
-            for (int s = 0; s <= sectors; ++s) {
-                float phi = (float)s / sectors * 2.0f * PI;
-                outPositions.push_back(std::sin(theta) * std::cos(phi) * radius);
-                outPositions.push_back(std::cos(theta) * radius);
-                outPositions.push_back(std::sin(theta) * std::sin(phi) * radius);
-            }
-        }
-        for (int r = 0; r < rings; ++r) {
-            for (int s = 0; s < sectors; ++s) {
-                uint16_t cur = (uint16_t)(r * (sectors + 1) + s);
-                uint16_t next = (uint16_t)((r + 1) * (sectors + 1) + s);
-                outIndices.push_back(cur);
-                outIndices.push_back(next);
-                outIndices.push_back((uint16_t)(cur + 1));
-
-                outIndices.push_back((uint16_t)(cur + 1));
-                outIndices.push_back(next);
-                outIndices.push_back((uint16_t)(next + 1));
-            }
-        }
-    } else if (type == MeshType::Cylinder) {
-        const int segments = 16;
-        const float radius = 0.5f;
-        const float halfH = 0.5f;
-        outPositions.insert(outPositions.end(), {0.0f, halfH, 0.0f, 0.0f, -halfH, 0.0f});
-        for (int i = 0; i <= segments; ++i) {
-            float angle = (float)i / segments * 2.0f * PI;
-            float x = std::cos(angle) * radius;
-            float z = std::sin(angle) * radius;
-            outPositions.insert(outPositions.end(), {x, halfH, z});
-            outPositions.insert(outPositions.end(), {x, -halfH, z});
-        }
-        for (int i = 0; i < segments; ++i) {
-            uint16_t t0 = (uint16_t)(2 + i * 2);
-            uint16_t b0 = (uint16_t)(t0 + 1);
-            uint16_t t1 = (uint16_t)(t0 + 2);
-            uint16_t b1 = (uint16_t)(t0 + 3);
-            outIndices.insert(outIndices.end(), {t0, b0, t1, t1, b0, b1});
-            outIndices.insert(outIndices.end(), {0, t1, t0});
-            outIndices.insert(outIndices.end(), {1, b0, b1});
-        }
-    }
-}
-
 // Fixes Bug #1 (writeBinary = true for real binary .glb with glTF magic header) and Bug #2 (degrees -> radians)
 static bool ExportGLB(const std::string& filename) {
     tinygltf::Model model;
@@ -930,7 +831,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const char* glsl_version = "#version 130";
+    const char* glsl_version = "#version 120";
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -1177,9 +1078,9 @@ int main(int argc, char* argv[]) {
             }
             ImGui::SameLine();
             if (ImGui::Button("Focus")) {
-                cameraTarget[0] = obj.Position[0];
-                cameraTarget[1] = obj.Position[1];
-                cameraTarget[2] = obj.Position[2];
+                cameraTarget[0] = g_Objects[g_SelectedObjectIndex].Position[0];
+                cameraTarget[1] = g_Objects[g_SelectedObjectIndex].Position[1];
+                cameraTarget[2] = g_Objects[g_SelectedObjectIndex].Position[2];
             }
             ImGui::SameLine();
             if (ImGui::Button("Delete")) {

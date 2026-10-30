@@ -35,7 +35,7 @@ make
 ./engine
 
 
-To clean build artifacts (.o, .d, binary, and exported .glb files):
+To clean build artifacts (.o, .d, binary, and test executables):
 
 make clean
 
@@ -53,3 +53,30 @@ Embedded Lua 5.4 Scripting & Live on_update(dt) Loop: Persistent Lua state with 
 Binary GLB 2.0 Export: Exports visible scene objects with accurate degree-to-radians quaternion rotations, primitive geometry buffers, and PBR material properties (Base Color, Metallic, Roughness) into valid binary .glb files.
 
 Unreal-Style ImGui Interface: Transparent central dockspace, World Outliner with search filter, Details inspector, interactive Content Browser (mesh spawners, PBR material presets, and Lua script templates), and virtualized console output (ImGuiListClipper).
+
+
+## Additional Lua API
+
+Object indices are zero-based. Removing an object shifts all following indices;
+use `find_object(name)` again after removal rather than caching shifted indices.
+
+- `duplicate_object(index [, name])`: copy mesh, transform, color, material and visibility; returns the new index, or `-1` for an invalid index. The default name appends ` Copy`. The position is preserved.
+- `set_name(index, name)`: rename an object; returns success.
+- `set_material(index, metallic, roughness)`: set PBR factors, clamped to `[0, 1]`; returns success.
+- `get_material(index)`: return metallic and roughness, or no values for an invalid index.
+
+Transform, color and material setters reject non-finite or out-of-float-range
+numbers before changing the object. Running a new script clears the previous
+`on_update` callback; the new script may install its own callback. Pause/Play
+remains under the user's control.
+
+## Tests
+
+`make test` runs standalone C++ scene and geometry regression tests (no SDL/Lua
+installation required). `make test-integration` additionally tests the real Lua
+API, stack recovery, callback lifecycle and binary GLB round trip with the normal
+build dependencies installed. GitHub Actions also builds and smoke-tests the
+editor under Xvfb. `make clean` preserves exported `.glb` assets.
+
+The checked-in Windows `engine.exe` is a legacy build; rebuild with
+`make -f Makefile.win` to include source changes.

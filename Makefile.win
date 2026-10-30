@@ -7,7 +7,7 @@ SRC = main.cpp $(IMGUI_SRC)
 
 all: engine.exe
 
-engine.exe: $(SRC)
+engine.exe: $(SRC) scene_core.h
 	$(CXX) $(CXXFLAGS) -o engine.exe $(SRC) $(LDFLAGS)
 
 clean:
