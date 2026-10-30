@@ -7,3 +7,9 @@ SDL2-*/
 /tests/core_tests
 /tests/engine_tests
 /tests/test-scene.glb
+
+/build/
+*.o
+*.d
+/tools/node_modules/
+imgui.ini

@@ -180,3 +180,17 @@ static int DuplicateObject(std::vector<GameObject>& objects, int index, const st
     objects.push_back(copy);
     return static_cast<int>(objects.size()) - 1;
 }
+
+// Strict decimal seconds; malformed or zero values disable the timeout.
+// Clamp below the SDL 32-bit tick wrap period.
+static uint64_t ParseTestTimeoutMs(const char* value) {
+    if (!value || !*value) return 0;
+    const uint64_t limit = 3600000;
+    uint64_t seconds = 0;
+    for (const char* p = value; *p; ++p) {
+        if (*p < '0' || *p > '9') return 0;
+        seconds = seconds > limit / 10 ? limit : seconds * 10 + (*p - '0');
+        if (seconds > limit) seconds = limit;
+    }
+    return seconds * 1000;
+}

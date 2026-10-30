@@ -1,6 +1,9 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -O2 -std=c++11 -MMD -MP -I/usr/include/lua5.4 -I/usr/include/SDL2 -I./imgui -I./imgui/backends -I./win_deps -I./win_deps/nlohmann
+CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP -I/usr/include/lua5.4 -I/usr/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps -isystem ./win_deps/nlohmann
 LDFLAGS = -llua5.4 -lSDL2 -lGL -lm -ldl
+
+CXXFLAGS += $(EXTRA_CXXFLAGS)
+LDFLAGS += $(EXTRA_LDFLAGS)
 
 IMGUI_SRC = \
 	imgui/imgui.cpp \
@@ -35,7 +38,7 @@ test: tests/core_tests
 	./tests/core_tests
 
 tests/core_tests: tests/core_tests.cpp scene_core.h
-	$(CXX) -std=c++11 -Wall -Wextra -pedantic -O2 $< -o $@
+	$(CXX) -std=c++11 -Wall -Wextra -pedantic -Werror -O2 $< -o $@
 
 test-integration: tests/engine_tests
 	./tests/engine_tests

@@ -3,6 +3,14 @@
 #include <iostream>
 
 int main() {
+    assert(ParseTestTimeoutMs(nullptr) == 0);
+    assert(ParseTestTimeoutMs("") == 0);
+    assert(ParseTestTimeoutMs("0") == 0);
+    assert(ParseTestTimeoutMs("2") == 2000);
+    assert(ParseTestTimeoutMs("-1") == 0);
+    assert(ParseTestTimeoutMs("2junk") == 0);
+    assert(ParseTestTimeoutMs(" 2") == 0);
+    assert(ParseTestTimeoutMs("999999999999999999999999") == 3600000000ULL);
     assert(ParseMeshType("SPHERE") == MeshType::Sphere);
     assert(std::string(GetMeshTypeName(MeshType::Cylinder)) == "Cylinder");
     for (int t = 0; t < 5; ++t) {

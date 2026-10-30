@@ -1,14 +1,43 @@
 CXX = x86_64-w64-mingw32-g++
-CXXFLAGS = -Wall -std=c++11 -I./lua-5.4.6/src -I./SDL2-2.30.0/x86_64-w64-mingw32/include/SDL2 -I./imgui -I./imgui/backends -I./win_deps
-LDFLAGS = -L./lua-5.4.6/src -L./SDL2-2.30.0/x86_64-w64-mingw32/lib -llua -lmingw32 -lSDL2main -lSDL2 -lopengl32 -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
+LUA_DIR ?= build/deps/lua-5.4.6/src
+SDL_DIR ?= build/deps/SDL2-2.30.0/x86_64-w64-mingw32
+BUILD_DIR ?= build/win
+CPPFLAGS = -DSDL_MAIN_HANDLED -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps
+CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP
+LDLIBS = -L$(LUA_DIR) -L$(SDL_DIR)/lib -llua -lSDL2 -lopengl32 -lm
+LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 
 IMGUI_SRC = imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
-SRC = main.cpp $(IMGUI_SRC)
+OBJS = $(addprefix $(BUILD_DIR)/obj/,$(IMGUI_SRC:.cpp=.o))
+ENGINE_OBJ = $(BUILD_DIR)/obj/main.o
+TEST_OBJ = $(BUILD_DIR)/obj/tests/engine_tests.o
+DEPS = $(OBJS:.o=.d) $(ENGINE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 
-all: engine.exe
+.PHONY: all tests package clean
+all: $(BUILD_DIR)/engine.exe
 
-engine.exe: $(SRC) scene_core.h
-	$(CXX) $(CXXFLAGS) -o engine.exe $(SRC) $(LDFLAGS)
+$(BUILD_DIR)/engine.exe: $(ENGINE_OBJ) $(OBJS)
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/engine_tests.exe: $(TEST_OBJ) $(OBJS)
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/core_tests.exe: tests/core_tests.cpp scene_core.h
+	mkdir -p $(BUILD_DIR)
+	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< -static-libgcc -static-libstdc++ -o $@
+
+$(BUILD_DIR)/obj/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+tests: $(BUILD_DIR)/core_tests.exe $(BUILD_DIR)/engine_tests.exe
+
+package: all tests
+	cp $(SDL_DIR)/bin/SDL2.dll $(BUILD_DIR)/
+	cp README.md $(BUILD_DIR)/
+	cp -r examples docs $(BUILD_DIR)/
+
+-include $(DEPS)
 
 clean:
-	rm -f engine.exe
+	rm -rf $(BUILD_DIR)
