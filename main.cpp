@@ -11,6 +11,8 @@ extern "C" {
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstdint>
 #include <algorithm>
 
 #include "imgui.h"
@@ -24,6 +26,7 @@ extern "C" {
 #include <tiny_gltf.h>
 
 static const float PI = 3.14159265358979323846f;
+static const size_t MAX_CONSOLE_LINES = 500;
 
 enum class MeshType : int {
     Cube = 0,
@@ -56,12 +59,12 @@ static MeshType ParseMeshType(const std::string& typeStr) {
     return MeshType::Cube;
 }
 
-// Enhanced GameObject structure
+// Enhanced GameObject structure (Rotation is stored in degrees for UI clarity and converted to radians on GLB export)
 struct GameObject {
     std::string Name;
     MeshType Type = MeshType::Cube;
     float Position[3] = {0.0f, 0.0f, 0.0f};
-    float Rotation[3] = {0.0f, 0.0f, 0.0f};
+    float Rotation[3] = {0.0f, 0.0f, 0.0f}; // Degrees (X, Y, Z)
     float Scale[3]    = {1.0f, 1.0f, 1.0f};
     float Color[3]    = {0.80f, 0.45f, 0.20f};
     float Metallic    = 0.1f;
@@ -82,11 +85,15 @@ bool g_ShowGrid = true;
 bool g_ShowAxes = true;
 bool g_GlobalWireframe = false;
 bool g_AutoScrollConsole = true;
+bool g_ConsoleScrollToBottom = false;
 char g_OutlinerFilter[128] = "";
+
+std::vector<std::string> g_ConsoleLines;
+std::string g_ConsoleOutput = "";
 
 char g_ScriptBuffer[1024 * 16] =
     "-- Lua 3D Engine: Interactive Demo Script\n"
-    "print('Initializing procedural scene...')\n"
+    "print('Initializing procedural scene...', true, nil)\n"
     "clear_scene()\n\n"
     "local sun = add_object('Sun', 'sphere')\n"
     "set_position(sun, 0, 1.5, 0)\n"
@@ -111,21 +118,43 @@ char g_ScriptBuffer[1024 * 16] =
     "    set_rotation(moon, 0, -angle * 120, 0)\n"
     "end\n";
 
-std::string g_ConsoleOutput = "";
-
 // Forward declarations
 static bool ExportGLB(const std::string& filename);
 static void InitLuaState();
 static void ShutdownLuaState();
 
+// Bounded console output (fixes Bug #7: prevents unbounded growth & splits lines for ImGuiListClipper)
 static void AppendConsole(const std::string& msg) {
+    size_t start = 0;
+    while (start < msg.size()) {
+        size_t pos = msg.find('\n', start);
+        std::string line = (pos == std::string::npos)
+            ? msg.substr(start)
+            : msg.substr(start, pos - start);
+        if (!line.empty() || pos != std::string::npos) {
+            g_ConsoleLines.push_back(line);
+            if (g_ConsoleLines.size() > MAX_CONSOLE_LINES) {
+                g_ConsoleLines.erase(g_ConsoleLines.begin(),
+                                     g_ConsoleLines.begin() + (g_ConsoleLines.size() - MAX_CONSOLE_LINES));
+            }
+        }
+        if (pos == std::string::npos) break;
+        start = pos + 1;
+    }
+
     g_ConsoleOutput += msg;
     if (g_ConsoleOutput.size() > 64 * 1024) {
         g_ConsoleOutput.erase(0, g_ConsoleOutput.size() - 48 * 1024);
     }
+    g_ConsoleScrollToBottom = true;
 }
 
-// Fixed l_print: uses luaL_tolstring so booleans, nil, numbers, and tables print properly
+static void ClearConsole() {
+    g_ConsoleLines.clear();
+    g_ConsoleOutput.clear();
+}
+
+// Fixed l_print (Bug #3): uses luaL_tolstring so nil, booleans, numbers, and tables print properly
 static int l_print(lua_State *L) {
     int n = lua_gettop(L);
     std::string line;
@@ -169,7 +198,7 @@ static int l_remove_object(lua_State *L) {
         lua_pushboolean(L, 1);
         return 1;
     }
-    AppendConsole("Error: Object index out of bounds in remove_object\n");
+    AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in remove_object\n");
     lua_pushboolean(L, 0);
     return 1;
 }
@@ -195,17 +224,24 @@ static int l_find_object(lua_State *L) {
     return 1;
 }
 
-// Lua: set_position(index, x, y, z) - 0-based index
+// Lua: set_position(index, x, y, z) - 0-based index (Fixes Bug #6: reports out-of-bounds index)
 static int l_set_position(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
+    float x = (float)luaL_checknumber(L, 2);
+    float y = (float)luaL_checknumber(L, 3);
+    float z = (float)luaL_checknumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
-        g_Objects[index].Position[0] = (float)luaL_checknumber(L, 2);
-        g_Objects[index].Position[1] = (float)luaL_checknumber(L, 3);
-        g_Objects[index].Position[2] = (float)luaL_checknumber(L, 4);
+        g_Objects[index].Position[0] = x;
+        g_Objects[index].Position[1] = y;
+        g_Objects[index].Position[2] = z;
+        lua_pushboolean(L, 1);
     } else {
-        AppendConsole("Error: Object index out of bounds in set_position\n");
+        AppendConsole("Error: Object index " + std::to_string(index) +
+                      " out of bounds in set_position (object count: " +
+                      std::to_string(g_Objects.size()) + ")\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: get_position(index) -> x, y, z
@@ -217,20 +253,26 @@ static int l_get_position(lua_State *L) {
         lua_pushnumber(L, g_Objects[index].Position[2]);
         return 3;
     }
+    AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in get_position\n");
     return 0;
 }
 
-// Lua: set_rotation(index, rx, ry, rz)
+// Lua: set_rotation(index, rx_deg, ry_deg, rz_deg)
 static int l_set_rotation(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
+    float rx = (float)luaL_checknumber(L, 2);
+    float ry = (float)luaL_checknumber(L, 3);
+    float rz = (float)luaL_checknumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
-        g_Objects[index].Rotation[0] = (float)luaL_checknumber(L, 2);
-        g_Objects[index].Rotation[1] = (float)luaL_checknumber(L, 3);
-        g_Objects[index].Rotation[2] = (float)luaL_checknumber(L, 4);
+        g_Objects[index].Rotation[0] = rx;
+        g_Objects[index].Rotation[1] = ry;
+        g_Objects[index].Rotation[2] = rz;
+        lua_pushboolean(L, 1);
     } else {
-        AppendConsole("Error: Object index out of bounds in set_rotation\n");
+        AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in set_rotation\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: get_rotation(index) -> rx, ry, rz
@@ -242,20 +284,26 @@ static int l_get_rotation(lua_State *L) {
         lua_pushnumber(L, g_Objects[index].Rotation[2]);
         return 3;
     }
+    AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in get_rotation\n");
     return 0;
 }
 
 // Lua: set_scale(index, sx, sy, sz)
 static int l_set_scale(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
+    float sx = (float)luaL_checknumber(L, 2);
+    float sy = (float)luaL_checknumber(L, 3);
+    float sz = (float)luaL_checknumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
-        g_Objects[index].Scale[0] = (float)luaL_checknumber(L, 2);
-        g_Objects[index].Scale[1] = (float)luaL_checknumber(L, 3);
-        g_Objects[index].Scale[2] = (float)luaL_checknumber(L, 4);
+        g_Objects[index].Scale[0] = sx;
+        g_Objects[index].Scale[1] = sy;
+        g_Objects[index].Scale[2] = sz;
+        lua_pushboolean(L, 1);
     } else {
-        AppendConsole("Error: Object index out of bounds in set_scale\n");
+        AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in set_scale\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: get_scale(index) -> sx, sy, sz
@@ -267,20 +315,26 @@ static int l_get_scale(lua_State *L) {
         lua_pushnumber(L, g_Objects[index].Scale[2]);
         return 3;
     }
+    AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in get_scale\n");
     return 0;
 }
 
 // Lua: set_color(index, r, g, b)
 static int l_set_color(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
+    float r = (float)luaL_checknumber(L, 2);
+    float g = (float)luaL_checknumber(L, 3);
+    float b = (float)luaL_checknumber(L, 4);
     if (index >= 0 && index < (int)g_Objects.size()) {
-        g_Objects[index].Color[0] = std::max(0.0f, std::min(1.0f, (float)luaL_checknumber(L, 2)));
-        g_Objects[index].Color[1] = std::max(0.0f, std::min(1.0f, (float)luaL_checknumber(L, 3)));
-        g_Objects[index].Color[2] = std::max(0.0f, std::min(1.0f, (float)luaL_checknumber(L, 4)));
+        g_Objects[index].Color[0] = std::max(0.0f, std::min(1.0f, r));
+        g_Objects[index].Color[1] = std::max(0.0f, std::min(1.0f, g));
+        g_Objects[index].Color[2] = std::max(0.0f, std::min(1.0f, b));
+        lua_pushboolean(L, 1);
     } else {
-        AppendConsole("Error: Object index out of bounds in set_color\n");
+        AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in set_color\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: get_color(index) -> r, g, b
@@ -292,6 +346,7 @@ static int l_get_color(lua_State *L) {
         lua_pushnumber(L, g_Objects[index].Color[2]);
         return 3;
     }
+    AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in get_color\n");
     return 0;
 }
 
@@ -300,8 +355,12 @@ static int l_set_visible(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Visible = lua_toboolean(L, 2) != 0;
+        lua_pushboolean(L, 1);
+    } else {
+        AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in set_visible\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: set_wireframe(index, wireframe)
@@ -309,8 +368,12 @@ static int l_set_wireframe(lua_State *L) {
     int index = (int)luaL_checkinteger(L, 1);
     if (index >= 0 && index < (int)g_Objects.size()) {
         g_Objects[index].Wireframe = lua_toboolean(L, 2) != 0;
+        lua_pushboolean(L, 1);
+    } else {
+        AppendConsole("Error: Object index " + std::to_string(index) + " out of bounds in set_wireframe\n");
+        lua_pushboolean(L, 0);
     }
-    return 0;
+    return 1;
 }
 
 // Lua: get_object_count() -> int
@@ -330,9 +393,9 @@ static int l_export_glb(lua_State *L) {
     const char* filename = luaL_checkstring(L, 1);
     bool res = ExportGLB(filename);
     if (res) {
-        AppendConsole(std::string("Successfully exported scene to ") + filename + "\n");
+        AppendConsole(std::string("Successfully exported binary GLB to ") + filename + "\n");
     } else {
-        AppendConsole(std::string("Failed to export scene to ") + filename + "\n");
+        AppendConsole(std::string("Failed to export GLB to ") + filename + "\n");
     }
     lua_pushboolean(L, res ? 1 : 0);
     return 1;
@@ -370,30 +433,34 @@ static void ShutdownLuaState() {
     }
 }
 
+// Fixes Bug #4 (stack leak on return values) and Bug #5 (crash on non-string Lua error like error({}))
 static void ExecuteLuaScript(const char* script) {
-    InitLuaState();
-    AppendConsole("> Running Lua Script...\n");
-    if (luaL_dostring(g_LuaState, script) != LUA_OK) {
-        const char *err = lua_tostring(g_LuaState, -1);
-        AppendConsole(std::string("Lua Error: ") + (err ? err : "Unknown error") + "\n");
-        lua_pop(g_LuaState, 1);
+    if (!g_LuaState) {
+        InitLuaState();
     }
+    AppendConsole("> Running Lua Script...\n");
+    int topBefore = lua_gettop(g_LuaState);
+    if (luaL_dostring(g_LuaState, script) != LUA_OK) {
+        const char *err = luaL_tolstring(g_LuaState, -1, nullptr);
+        AppendConsole(std::string("Lua Error: ") + (err ? err : "Unknown error") + "\n");
+    }
+    // Restore stack top so return values or error objects never accumulate on the stack
+    lua_settop(g_LuaState, topBefore);
 }
 
 static void UpdateLuaScript(float dt) {
     if (!g_LuaState || !g_SimulationRunning) return;
+    int topBefore = lua_gettop(g_LuaState);
     lua_getglobal(g_LuaState, "on_update");
     if (lua_isfunction(g_LuaState, -1)) {
         lua_pushnumber(g_LuaState, dt);
         if (lua_pcall(g_LuaState, 1, 0, 0) != LUA_OK) {
-            const char *err = lua_tostring(g_LuaState, -1);
+            const char *err = luaL_tolstring(g_LuaState, -1, nullptr);
             AppendConsole(std::string("Lua on_update Error: ") + (err ? err : "Unknown error") + "\n");
-            lua_pop(g_LuaState, 1);
             g_SimulationRunning = false; // pause on runtime error to prevent log spam
         }
-    } else {
-        lua_pop(g_LuaState, 1);
     }
+    lua_settop(g_LuaState, topBefore);
 }
 
 // -----------------------------------------------------------------------------
@@ -614,17 +681,18 @@ static void RenderGrid() {
     glEnd();
 }
 
-// Convert OpenGL Euler angles (degrees, applied as Rx * Ry * Rz) to glTF quaternion [x, y, z, w]
-static std::vector<double> EulerToQuaternion(float rxDeg, float ryDeg, float rzDeg) {
-    double hx = (rxDeg * PI / 180.0) * 0.5;
-    double hy = (ryDeg * PI / 180.0) * 0.5;
-    double hz = (rzDeg * PI / 180.0) * 0.5;
+// Fixes Bug #2: converts UI degrees to radians before computing quaternion (intrinsic XYZ / Qx * Qy * Qz matching glRotatef order)
+static std::vector<double> EulerDegreesToQuaternion(float rxDeg, float ryDeg, float rzDeg) {
+    const double degToRad = PI / 180.0;
+    double hx = (rxDeg * degToRad) * 0.5;
+    double hy = (ryDeg * degToRad) * 0.5;
+    double hz = (rzDeg * degToRad) * 0.5;
 
     double cx = std::cos(hx), sx = std::sin(hx);
     double cy = std::cos(hy), sy = std::sin(hy);
     double cz = std::cos(hz), sz = std::sin(hz);
 
-    // Quaternion product Q = Qx * Qy * Qz
+    // Quaternion product Q = Qx * Qy * Qz (matches OpenGL glRotatef(rx,1,0,0) * glRotatef(ry,0,1,0) * glRotatef(rz,0,0,1))
     double qw = cx * cy * cz - sx * sy * sz;
     double qx = sx * cy * cz + cx * sy * sz;
     double qy = cx * sy * cz - sx * cy * sz;
@@ -649,7 +717,6 @@ static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPosi
              0.5f,  0.5f, -0.5f, // 6: Back-Top-Right
              0.5f, -0.5f, -0.5f  // 7: Back-Bottom-Right
         };
-        // Proper outward CCW winding for all 6 faces (fixes the Left face winding bug)
         outIndices = {
             0, 1, 2,  0, 2, 3, // Front  (+Z)
             7, 4, 5,  7, 5, 6, // Back   (-Z)
@@ -711,7 +778,6 @@ static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPosi
         const int segments = 16;
         const float radius = 0.5f;
         const float halfH = 0.5f;
-        // 0: Top center, 1: Bottom center
         outPositions.insert(outPositions.end(), {0.0f, halfH, 0.0f, 0.0f, -halfH, 0.0f});
         for (int i = 0; i <= segments; ++i) {
             float angle = (float)i / segments * 2.0f * PI;
@@ -725,23 +791,24 @@ static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPosi
             uint16_t b0 = (uint16_t)(t0 + 1);
             uint16_t t1 = (uint16_t)(t0 + 2);
             uint16_t b1 = (uint16_t)(t0 + 3);
-            // Side quad
             outIndices.insert(outIndices.end(), {t0, b0, t1, t1, b0, b1});
-            // Top cap
             outIndices.insert(outIndices.end(), {0, t1, t0});
-            // Bottom cap
             outIndices.insert(outIndices.end(), {1, b0, b1});
         }
     }
 }
 
-// Fixed and enhanced GLB Export using tinygltf (proper CCW winding, Euler->Quaternion, all 5 primitives & PBR materials)
+// Fixes Bug #1 (writeBinary = true for real binary .glb with glTF magic header) and Bug #2 (degrees -> radians)
 static bool ExportGLB(const std::string& filename) {
     tinygltf::Model model;
     tinygltf::Scene scene;
     scene.name = "Lua3D Scene";
 
-    // Build shared geometry accessors for each of the 5 MeshTypes
+    tinygltf::Asset asset;
+    asset.version = "2.0";
+    asset.generator = "3D Lua Engine Editor";
+    model.asset = asset;
+
     int posAccessorByType[5] = {-1, -1, -1, -1, -1};
     int idxAccessorByType[5] = {-1, -1, -1, -1, -1};
 
@@ -759,7 +826,6 @@ static bool ExportGLB(const std::string& filename) {
             }
         }
 
-        // Positions Buffer
         tinygltf::Buffer posBuffer;
         posBuffer.data.resize(positions.size() * sizeof(float));
         std::memcpy(posBuffer.data.data(), positions.data(), posBuffer.data.size());
@@ -785,7 +851,6 @@ static bool ExportGLB(const std::string& filename) {
         posAccessorByType[t] = (int)model.accessors.size();
         model.accessors.push_back(posAccessor);
 
-        // Indices Buffer
         tinygltf::Buffer idxBuffer;
         idxBuffer.data.resize(indices.size() * sizeof(uint16_t));
         std::memcpy(idxBuffer.data.data(), indices.data(), idxBuffer.data.size());
@@ -810,7 +875,6 @@ static bool ExportGLB(const std::string& filename) {
         model.accessors.push_back(idxAccessor);
     }
 
-    // Create Nodes, Materials, and Meshes for each visible GameObject
     for (size_t i = 0; i < g_Objects.size(); ++i) {
         const GameObject& obj = g_Objects[i];
         if (!obj.Visible) continue;
@@ -843,7 +907,7 @@ static bool ExportGLB(const std::string& filename) {
         node.name = obj.Name;
         node.mesh = meshIndex;
         node.translation = {obj.Position[0], obj.Position[1], obj.Position[2]};
-        node.rotation = EulerToQuaternion(obj.Rotation[0], obj.Rotation[1], obj.Rotation[2]);
+        node.rotation = EulerDegreesToQuaternion(obj.Rotation[0], obj.Rotation[1], obj.Rotation[2]);
         node.scale = {obj.Scale[0], obj.Scale[1], obj.Scale[2]};
 
         int nodeIndex = (int)model.nodes.size();
@@ -855,14 +919,15 @@ static bool ExportGLB(const std::string& filename) {
     model.defaultScene = 0;
 
     tinygltf::TinyGLTF writer;
-    return writer.WriteGltfSceneToFile(&model, filename, true, true, true, false);
+    // Last argument MUST be true to write binary .glb (fixes Bug #1)
+    return writer.WriteGltfSceneToFile(&model, filename, true, true, true, true);
 }
 
 int main(int argc, char* argv[]) {
     (void)argc; (void)argv;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
-        return -1;
+        return 1;
     }
 
     const char* glsl_version = "#version 130";
@@ -876,14 +941,20 @@ int main(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_Window* window = SDL_CreateWindow("Lua 3D Engine Studio", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 800, window_flags);
+    SDL_Window* window = SDL_CreateWindow("3D Lua Engine Editor", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 800, window_flags);
     if (!window) {
         std::cerr << "Error creating SDL Window: " << SDL_GetError() << std::endl;
         SDL_Quit();
-        return -1;
+        return 1;
     }
 
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
+    if (!gl_context) {
+        std::cerr << "Error creating OpenGL context: " << SDL_GetError() << std::endl;
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1);
 
@@ -901,8 +972,21 @@ int main(int argc, char* argv[]) {
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
-    // Run initial default script to populate the scene
+    InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
+
+    // Fixes Bug #11: Safe 64-bit parsing of TEST_TIMEOUT (in seconds) without signed int overflow
+    const char* env_timeout = std::getenv("TEST_TIMEOUT");
+    Uint32 start_time = SDL_GetTicks();
+    uint64_t timeout_ms = 0;
+    if (env_timeout != nullptr && *env_timeout != '\0') {
+        char* endptr = nullptr;
+        unsigned long long secs = std::strtoull(env_timeout, &endptr, 10);
+        if (endptr != env_timeout && secs > 0) {
+            const unsigned long long max_secs = 3600000ULL;
+            timeout_ms = (secs > max_secs) ? (max_secs * 1000ULL) : (secs * 1000ULL);
+        }
+    }
 
     bool done = false;
     float cameraDistance = 10.0f;
@@ -914,6 +998,10 @@ int main(int argc, char* argv[]) {
 
     while (!done) {
         Uint32 currentTicks = SDL_GetTicks();
+        if (timeout_ms > 0 && (uint64_t)(currentTicks - start_time) >= timeout_ms) {
+            done = true;
+        }
+
         float dt = (float)(currentTicks - lastTicks) / 1000.0f;
         if (dt > 0.1f) dt = 0.1f;
         lastTicks = currentTicks;
@@ -926,7 +1014,6 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
                 done = true;
 
-            // Mouse orbit / pan / zoom in 3D viewport when cursor is not captured by ImGui windows
             if (!io.WantCaptureMouse) {
                 if (event.type == SDL_MOUSEWHEEL) {
                     cameraDistance -= event.wheel.y * 0.8f;
@@ -944,18 +1031,16 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Tick Lua on_update(dt)
         UpdateLuaScript(dt);
 
-        // Start Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        // Transparent DockSpace Setup (Fix: PassthruCentralNode + NoBackground so 3D scene is visible!)
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->Pos);
-        ImGui::SetNextWindowSize(viewport->Size);
+        // Transparent DockSpace Setup (PassthruCentralNode + NoBackground so 3D scene is visible)
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::SetNextWindowViewport(viewport->ID);
         ImGuiWindowFlags window_flags_dock = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
         window_flags_dock |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
@@ -964,7 +1049,7 @@ int main(int argc, char* argv[]) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::Begin("DockSpace Host", nullptr, window_flags_dock);
+        ImGui::Begin("DockSpace", nullptr, window_flags_dock);
         ImGui::PopStyleVar(3);
 
         ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
@@ -972,11 +1057,11 @@ int main(int argc, char* argv[]) {
 
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Export GLB Scene (scene.glb)")) {
-                    if (ExportGLB("scene.glb")) {
-                        AppendConsole("Exported scene.glb successfully.\n");
+                if (ImGui::MenuItem("Export GLB")) {
+                    if (ExportGLB("export.glb")) {
+                        AppendConsole("> Exported binary scene to export.glb\n");
                     } else {
-                        AppendConsole("Error exporting scene.glb.\n");
+                        AppendConsole("> Failed to export GLB\n");
                     }
                 }
                 if (ImGui::MenuItem("Clear Scene")) {
@@ -997,14 +1082,32 @@ int main(int argc, char* argv[]) {
             if (ImGui::Button(g_SimulationRunning ? "Pause Lua (on_update)" : "Play Lua (on_update)")) {
                 g_SimulationRunning = !g_SimulationRunning;
             }
-            ImGui::Text(" | Objects: %d | FPS: %.1f (%.2f ms)", (int)g_Objects.size(), io.Framerate, 1000.0f / (io.Framerate > 0 ? io.Framerate : 1.0f));
+            ImGui::Text(" | Objects: %d | FPS: %.1f", (int)g_Objects.size(), io.Framerate);
             ImGui::EndMenuBar();
         }
         ImGui::End();
 
-        // 1. World Outliner Window
+        // 1. Viewport Controls Panel (Fixes Bug #8: real interactive 3D viewport controls instead of static text)
+        ImGui::Begin("Viewport");
+        ImGui::TextDisabled("RMB Drag: Orbit | MMB Drag: Pan | Wheel: Zoom");
+        ImGui::SliderFloat("Distance", &cameraDistance, 1.5f, 50.0f);
+        ImGui::SliderFloat("Pitch (deg)", &cameraAngleX, -89.0f, 89.0f);
+        ImGui::SliderFloat("Yaw (deg)", &cameraAngleY, -180.0f, 180.0f);
+        ImGui::DragFloat3("Target", cameraTarget, 0.1f);
+        if (ImGui::Button("Iso"))   { cameraAngleX = 25.0f; cameraAngleY = -35.0f; }
+        ImGui::SameLine();
+        if (ImGui::Button("Top"))   { cameraAngleX = 89.0f; cameraAngleY = 0.0f; }
+        ImGui::SameLine();
+        if (ImGui::Button("Front")) { cameraAngleX = 0.0f;  cameraAngleY = 0.0f; }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset")) {
+            cameraTarget[0] = 0.0f; cameraTarget[1] = 1.0f; cameraTarget[2] = 0.0f;
+            cameraDistance = 10.0f;
+        }
+        ImGui::End();
+
+        // 2. World Outliner Panel
         ImGui::Begin("World Outliner");
-        ImGui::Text("Add Primitive:");
         if (ImGui::Button("+ Cube"))     g_Objects.emplace_back("Cube " + std::to_string(g_Objects.size() + 1), MeshType::Cube);
         ImGui::SameLine();
         if (ImGui::Button("+ Pyramid"))  g_Objects.emplace_back("Pyramid " + std::to_string(g_Objects.size() + 1), MeshType::Pyramid);
@@ -1034,12 +1137,12 @@ int main(int argc, char* argv[]) {
         }
         ImGui::End();
 
-        // 2. Details Window
+        // 3. Details Panel (Fixes Bug #2: Rotation explicitly labeled and edited in degrees)
         ImGui::Begin("Details");
         if (g_SelectedObjectIndex >= 0 && g_SelectedObjectIndex < (int)g_Objects.size()) {
             GameObject& obj = g_Objects[g_SelectedObjectIndex];
             char nameBuf[128];
-            snprintf(nameBuf, sizeof(nameBuf), "%s", obj.Name.c_str()); // Safe null-terminated copy
+            snprintf(nameBuf, sizeof(nameBuf), "%s", obj.Name.c_str());
             if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf))) {
                 obj.Name = nameBuf;
             }
@@ -1055,24 +1158,17 @@ int main(int argc, char* argv[]) {
             ImGui::Checkbox("Wireframe", &obj.Wireframe);
 
             ImGui::Separator();
-            ImGui::Text("Transform");
             ImGui::DragFloat3("Position", obj.Position, 0.1f);
-            ImGui::DragFloat3("Rotation", obj.Rotation, 1.0f);
+            ImGui::DragFloat3("Rotation (deg)", obj.Rotation, 1.0f, -360.0f, 360.0f, "%.1f deg");
             ImGui::DragFloat3("Scale", obj.Scale, 0.05f, 0.01f, 100.0f);
-            if (ImGui::Button("Reset Transform")) {
-                obj.Position[0] = obj.Position[1] = obj.Position[2] = 0.0f;
-                obj.Rotation[0] = obj.Rotation[1] = obj.Rotation[2] = 0.0f;
-                obj.Scale[0] = obj.Scale[1] = obj.Scale[2] = 1.0f;
-            }
 
             ImGui::Separator();
-            ImGui::Text("Material & PBR (GLB Export)");
             ImGui::ColorEdit3("Base Color", obj.Color);
             ImGui::SliderFloat("Metallic", &obj.Metallic, 0.0f, 1.0f);
             ImGui::SliderFloat("Roughness", &obj.Roughness, 0.0f, 1.0f);
 
             ImGui::Separator();
-            if (ImGui::Button("Duplicate Object")) {
+            if (ImGui::Button("Duplicate")) {
                 GameObject copy = obj;
                 copy.Name += " Copy";
                 copy.Position[0] += 1.2f;
@@ -1080,98 +1176,130 @@ int main(int argc, char* argv[]) {
                 g_SelectedObjectIndex = (int)g_Objects.size() - 1;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Focus Camera")) {
+            if (ImGui::Button("Focus")) {
                 cameraTarget[0] = obj.Position[0];
                 cameraTarget[1] = obj.Position[1];
                 cameraTarget[2] = obj.Position[2];
             }
             ImGui::SameLine();
-            if (ImGui::Button("Delete Object")) {
+            if (ImGui::Button("Delete")) {
                 g_Objects.erase(g_Objects.begin() + g_SelectedObjectIndex);
                 g_SelectedObjectIndex = -1;
             }
         } else {
-            ImGui::TextDisabled("Select an object in World Outliner to inspect or edit.");
+            ImGui::TextDisabled("Select an object in World Outliner.");
         }
         ImGui::End();
 
-        // 3. Camera & Viewport Controls Window
-        ImGui::Begin("Camera & Viewport");
-        ImGui::TextDisabled("Tip: RMB Drag = Orbit, MMB Drag = Pan, Scroll = Zoom");
-        ImGui::SliderFloat("Distance", &cameraDistance, 1.5f, 50.0f);
-        ImGui::SliderFloat("Pitch (X)", &cameraAngleX, -89.0f, 89.0f);
-        ImGui::SliderFloat("Yaw (Y)", &cameraAngleY, -180.0f, 180.0f);
-        ImGui::DragFloat3("Target", cameraTarget, 0.1f);
-
-        if (ImGui::Button("Iso View"))   { cameraAngleX = 25.0f; cameraAngleY = -35.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Top View"))   { cameraAngleX = 89.0f; cameraAngleY = 0.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Front View")) { cameraAngleX = 0.0f;  cameraAngleY = 0.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Reset Origin")) {
-            cameraTarget[0] = 0.0f; cameraTarget[1] = 0.0f; cameraTarget[2] = 0.0f;
-            cameraDistance = 10.0f;
+        // 4. Interactive Content Browser Panel (Fixes Bug #8: functional asset & preset browser instead of dead text)
+        ImGui::Begin("Content Browser");
+        if (ImGui::CollapsingHeader("Models (Click to Spawn)", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::Button("Spawn Cube"))     g_Objects.emplace_back("Cube", MeshType::Cube);
+            ImGui::SameLine();
+            if (ImGui::Button("Spawn Sphere"))   g_Objects.emplace_back("Sphere", MeshType::Sphere);
+            ImGui::SameLine();
+            if (ImGui::Button("Spawn Pyramid"))  g_Objects.emplace_back("Pyramid", MeshType::Pyramid);
+            if (ImGui::Button("Spawn Cylinder")) g_Objects.emplace_back("Cylinder", MeshType::Cylinder);
+            ImGui::SameLine();
+            if (ImGui::Button("Spawn Ground Plane")) {
+                g_Objects.emplace_back("Ground Plane", MeshType::Plane);
+                g_Objects.back().Scale[0] = 10.0f;
+                g_Objects.back().Scale[2] = 10.0f;
+                g_Objects.back().Color[0] = 0.35f;
+                g_Objects.back().Color[1] = 0.38f;
+                g_Objects.back().Color[2] = 0.42f;
+            }
+        }
+        if (ImGui::CollapsingHeader("PBR Materials (Apply to Selected)", ImGuiTreeNodeFlags_DefaultOpen)) {
+            bool hasSel = (g_SelectedObjectIndex >= 0 && g_SelectedObjectIndex < (int)g_Objects.size());
+            if (!hasSel) ImGui::BeginDisabled();
+            if (ImGui::Button("Gold")) {
+                auto& o = g_Objects[g_SelectedObjectIndex];
+                o.Color[0] = 1.0f; o.Color[1] = 0.78f; o.Color[2] = 0.22f;
+                o.Metallic = 0.9f; o.Roughness = 0.2f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Chrome")) {
+                auto& o = g_Objects[g_SelectedObjectIndex];
+                o.Color[0] = 0.85f; o.Color[1] = 0.87f; o.Color[2] = 0.90f;
+                o.Metallic = 1.0f; o.Roughness = 0.1f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Emerald")) {
+                auto& o = g_Objects[g_SelectedObjectIndex];
+                o.Color[0] = 0.15f; o.Color[1] = 0.80f; o.Color[2] = 0.45f;
+                o.Metallic = 0.2f; o.Roughness = 0.3f;
+            }
+            if (!hasSel) ImGui::EndDisabled();
+        }
+        if (ImGui::CollapsingHeader("Scripts & Templates", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::Button("Load: Solar System")) {
+                snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
+                    "-- Animated Solar System Preset\n"
+                    "clear_scene()\n"
+                    "local sun = add_object('Sun', 'sphere')\n"
+                    "set_scale(sun, 1.6, 1.6, 1.6)\n"
+                    "set_color(sun, 1.0, 0.78, 0.15)\n\n"
+                    "local earth = add_object('Earth', 'sphere')\n"
+                    "set_scale(earth, 0.65, 0.65, 0.65)\n"
+                    "set_color(earth, 0.2, 0.55, 0.95)\n\n"
+                    "local mars = add_object('Mars', 'sphere')\n"
+                    "set_scale(mars, 0.5, 0.5, 0.5)\n"
+                    "set_color(mars, 0.9, 0.35, 0.2)\n\n"
+                    "local t = 0\n"
+                    "function on_update(dt)\n"
+                    "    t = t + dt\n"
+                    "    set_position(earth, math.cos(t * 1.4) * 3.5, 0, math.sin(t * 1.4) * 3.5)\n"
+                    "    set_position(mars, math.cos(t * 0.8) * 5.8, 0, math.sin(t * 0.8) * 5.8)\n"
+                    "end\n");
+                ExecuteLuaScript(g_ScriptBuffer);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Load: Spiral Tower")) {
+                snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
+                    "-- Procedural Spiral Tower Preset\n"
+                    "clear_scene()\n"
+                    "for i = 0, 29 do\n"
+                    "    local a = i * 0.35\n"
+                    "    local idx = add_object('Step_' .. i, 'cube')\n"
+                    "    set_position(idx, math.cos(a) * 2.5, i * 0.25, math.sin(a) * 2.5)\n"
+                    "    set_rotation(idx, 0, -a * 57.2958, 0)\n"
+                    "    set_scale(idx, 1.2, 0.2, 0.5)\n"
+                    "    set_color(idx, 0.3 + (i / 30) * 0.7, 0.5, 1.0 - (i / 30) * 0.6)\n"
+                    "end\n"
+                    "print('Generated 30 spiral steps!')\n");
+                ExecuteLuaScript(g_ScriptBuffer);
+            }
         }
         ImGui::End();
 
-        // 4. Script Editor & Console Window
+        // 5. Script Editor & Bounded Virtualized Console (Fixes Bug #7 via ImGuiListClipper)
         ImGui::Begin("Script Editor");
-        if (ImGui::Button("Run Lua Script")) {
-            ExecuteLuaScript(g_ScriptBuffer);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Preset: Solar System")) {
-            snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
-                "-- Animated Solar System Preset\n"
-                "clear_scene()\n"
-                "local sun = add_object('Sun', 'sphere')\n"
-                "set_scale(sun, 1.6, 1.6, 1.6)\n"
-                "set_color(sun, 1.0, 0.78, 0.15)\n\n"
-                "local earth = add_object('Earth', 'sphere')\n"
-                "set_scale(earth, 0.65, 0.65, 0.65)\n"
-                "set_color(earth, 0.2, 0.55, 0.95)\n\n"
-                "local mars = add_object('Mars', 'sphere')\n"
-                "set_scale(mars, 0.5, 0.5, 0.5)\n"
-                "set_color(mars, 0.9, 0.35, 0.2)\n\n"
-                "local t = 0\n"
-                "function on_update(dt)\n"
-                "    t = t + dt\n"
-                "    set_position(earth, math.cos(t * 1.4) * 3.5, 0, math.sin(t * 1.4) * 3.5)\n"
-                "    set_position(mars, math.cos(t * 0.8) * 5.8, 0, math.sin(t * 0.8) * 5.8)\n"
-                "end\n");
-            ExecuteLuaScript(g_ScriptBuffer);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Preset: Spiral Tower")) {
-            snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
-                "-- Procedural Spiral Tower Preset\n"
-                "clear_scene()\n"
-                "for i = 0, 29 do\n"
-                "    local a = i * 0.35\n"
-                "    local idx = add_object('Step_' .. i, 'cube')\n"
-                "    set_position(idx, math.cos(a) * 2.5, i * 0.25, math.sin(a) * 2.5)\n"
-                "    set_rotation(idx, 0, -a * 57.2958, 0)\n"
-                "    set_scale(idx, 1.2, 0.2, 0.5)\n"
-                "    set_color(idx, 0.3 + (i / 30) * 0.7, 0.5, 1.0 - (i / 30) * 0.6)\n"
-                "end\n"
-                "print('Generated 30 spiral steps!')\n");
+        ImGui::InputTextMultiline("##source", g_ScriptBuffer, IM_ARRAYSIZE(g_ScriptBuffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 14), ImGuiInputTextFlags_AllowTabInput);
+        if (ImGui::Button("Run Script")) {
             ExecuteLuaScript(g_ScriptBuffer);
         }
         ImGui::SameLine();
         if (ImGui::Button("Clear Console")) {
-            g_ConsoleOutput.clear();
+            ClearConsole();
         }
-
-        ImGui::InputTextMultiline("##Script", g_ScriptBuffer, sizeof(g_ScriptBuffer), ImVec2(-1, 210));
-        ImGui::Separator();
-        ImGui::Text("Console Output:");
         ImGui::SameLine();
         ImGui::Checkbox("Auto-scroll", &g_AutoScrollConsole);
-        ImGui::BeginChild("ConsoleScroll", ImVec2(0, 0), true);
-        ImGui::TextUnformatted(g_ConsoleOutput.c_str());
-        if (g_AutoScrollConsole && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+
+        ImGui::Separator();
+        ImGui::Text("Console Output (%d / %d lines):", (int)g_ConsoleLines.size(), (int)MAX_CONSOLE_LINES);
+        ImGui::BeginChild("ConsoleScrollRegion", ImVec2(0, 0), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGuiListClipper clipper;
+        clipper.Begin((int)g_ConsoleLines.size());
+        while (clipper.Step()) {
+            for (int line_no = clipper.DisplayStart; line_no < clipper.DisplayEnd; line_no++) {
+                ImGui::TextUnformatted(g_ConsoleLines[line_no].c_str());
+            }
+        }
+        clipper.End();
+        if (g_AutoScrollConsole && g_ConsoleScrollToBottom) {
             ImGui::SetScrollHereY(1.0f);
+            g_ConsoleScrollToBottom = false;
         }
         ImGui::EndChild();
         ImGui::End();
@@ -1187,7 +1315,7 @@ int main(int argc, char* argv[]) {
         }
 
         glViewport(0, 0, fb_width, fb_height);
-        glClearColor(0.11f, 0.12f, 0.14f, 1.0f);
+        glClearColor(0.10f, 0.11f, 0.14f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
 
