@@ -50,7 +50,7 @@ Real-Time 3D Viewport: Orbit (RMB drag), Pan (MMB drag), and Zoom (Mouse Wheel) 
 
 Embedded Lua 5.4 Scripting & Live on_update(dt) Loop: Persistent Lua state with stack-safe execution, full print() type serialization (nil, booleans, tables), bounds-checked transform/material APIs, and per-frame on_update(dt) simulation callbacks.
 
-Binary GLB 2.0 Export: Exports visible scene objects with accurate degree-to-radians quaternion rotations, primitive geometry buffers, and PBR material properties (Base Color, Metallic, Roughness) into valid binary .glb files.
+Binary GLB 2.0 Export: Exports visible scene objects with degree-to-radians quaternion rotations, an aligned binary geometry buffer, and PBR material properties (Base Color, Metallic, Roughness) into .glb files.
 
 Unreal-Style ImGui Interface: Transparent central dockspace, World Outliner with search filter, Details inspector, interactive Content Browser (mesh spawners, PBR material presets, and Lua script templates), and virtualized console output (ImGuiListClipper).
 
@@ -80,3 +80,5 @@ editor under Xvfb. `make clean` preserves exported `.glb` assets.
 
 The checked-in Windows `engine.exe` is a legacy build; rebuild with
 `make -f Makefile.win` to include source changes.
+
+The engine handles Lua error objects and failing `__tostring` callbacks without invoking their metamethods outside a protected call. Internal `on_update` lookup bypasses global-table metamethods, and host calls restore the previous Lua stack height.

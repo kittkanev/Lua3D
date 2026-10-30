@@ -107,21 +107,62 @@ static void ClearConsole() {
     g_ConsoleOutput.clear();
 }
 
-// Fixed l_print (Bug #3): uses luaL_tolstring so nil, booleans, numbers, and tables print properly
-static int l_print(lua_State *L) {
-    int n = lua_gettop(L);
-    std::string line;
-    for (int i = 1; i <= n; i++) {
-        const char *s = luaL_tolstring(L, i, nullptr);
-        if (s) {
-            line += s;
+// The conversion may call a user-defined __tostring and must run protected.
+static int LuaToString(lua_State* L) {
+    luaL_tolstring(L, 1, nullptr);
+    return 1;
+}
+
+static int l_print(lua_State* L) {
+    const int count = lua_gettop(L);
+    bool conversionFailed = false;
+    {
+        std::string line;
+        for (int i = 1; i <= count; ++i) {
+            lua_pushcfunction(L, LuaToString);
+            lua_pushvalue(L, i);
+            if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+                conversionFailed = true;
+                break;
+            }
+            size_t length = 0;
+            const char* value = lua_tolstring(L, -1, &length);
+            line.append(value, length);
+            lua_pop(L, 1);
+            if (i < count) line += "\t";
         }
-        lua_pop(L, 1); // pop string pushed by luaL_tolstring
-        if (i < n) line += "\t";
+        if (!conversionFailed) AppendConsole(line + "\n");
     }
-    line += "\n";
-    AppendConsole(line);
+    // Destroy C++ objects before Lua propagates the error via longjmp.
+    if (conversionFailed) return lua_error(L);
     return 0;
+}
+
+// Used only at the C++ host boundary, where Lua errors are handled by pcall.
+class LuaStackGuard {
+public:
+    explicit LuaStackGuard(lua_State* state) : state_(state), top_(lua_gettop(state)) {}
+    ~LuaStackGuard() { lua_settop(state_, top_); }
+    LuaStackGuard(const LuaStackGuard&) = delete;
+    LuaStackGuard& operator=(const LuaStackGuard&) = delete;
+private:
+    lua_State* state_;
+    int top_;
+};
+
+static void ClearUpdateCallback(lua_State* L) {
+    lua_pushglobaltable(L);
+    lua_pushliteral(L, "on_update");
+    lua_pushnil(L);
+    lua_rawset(L, -3);
+    lua_pop(L, 1);
+}
+
+static void PushUpdateCallback(lua_State* L) {
+    lua_pushglobaltable(L);
+    lua_pushliteral(L, "on_update");
+    lua_rawget(L, -2);
+    lua_remove(L, -2);
 }
 
 static float CheckFiniteNumber(lua_State* L, int argument) {
@@ -453,23 +494,19 @@ static void ExecuteLuaScript(const char* script) {
         InitLuaState();
     }
     AppendConsole("> Running Lua Script...\n");
-    int topBefore = lua_gettop(g_LuaState);
-    lua_pushnil(g_LuaState);
-    lua_setglobal(g_LuaState, "on_update");
+    LuaStackGuard guard(g_LuaState);
+    ClearUpdateCallback(g_LuaState);
     if (luaL_dostring(g_LuaState, script) != LUA_OK) {
-        lua_pushnil(g_LuaState);
-        lua_setglobal(g_LuaState, "on_update");
+        ClearUpdateCallback(g_LuaState);
         const std::string err = LuaErrorText(g_LuaState);
         AppendConsole(std::string("Lua Error: ") + err + "\n");
     }
-    // Restore stack top so return values or error objects never accumulate on the stack
-    lua_settop(g_LuaState, topBefore);
 }
 
 static void UpdateLuaScript(float dt) {
     if (!g_LuaState || !g_SimulationRunning) return;
-    int topBefore = lua_gettop(g_LuaState);
-    lua_getglobal(g_LuaState, "on_update");
+    LuaStackGuard guard(g_LuaState);
+    PushUpdateCallback(g_LuaState);
     if (lua_isfunction(g_LuaState, -1)) {
         lua_pushnumber(g_LuaState, dt);
         if (lua_pcall(g_LuaState, 1, 0, 0) != LUA_OK) {
@@ -478,7 +515,6 @@ static void UpdateLuaScript(float dt) {
             g_SimulationRunning = false; // pause on runtime error to prevent log spam
         }
     }
-    lua_settop(g_LuaState, topBefore);
 }
 
 // -----------------------------------------------------------------------------
@@ -713,6 +749,9 @@ static bool ExportGLB(const std::string& filename) {
     int posAccessorByType[5] = {-1, -1, -1, -1, -1};
     int idxAccessorByType[5] = {-1, -1, -1, -1, -1};
 
+    model.buffers.emplace_back();
+    std::vector<unsigned char>& binary = model.buffers[0].data;
+
     for (int t = 0; t < 5; ++t) {
         std::vector<float> positions;
         std::vector<uint16_t> indices;
@@ -727,16 +766,16 @@ static bool ExportGLB(const std::string& filename) {
             }
         }
 
-        tinygltf::Buffer posBuffer;
-        posBuffer.data.resize(positions.size() * sizeof(float));
-        std::memcpy(posBuffer.data.data(), positions.data(), posBuffer.data.size());
-        int posBufIdx = (int)model.buffers.size();
-        model.buffers.push_back(posBuffer);
+        while (binary.size() % 4 != 0) binary.push_back(0);
+        const size_t posOffset = binary.size();
+        const size_t posBytes = positions.size() * sizeof(float);
+        binary.resize(posOffset + posBytes);
+        std::memcpy(binary.data() + posOffset, positions.data(), posBytes);
 
         tinygltf::BufferView posBufferView;
-        posBufferView.buffer = posBufIdx;
-        posBufferView.byteOffset = 0;
-        posBufferView.byteLength = posBuffer.data.size();
+        posBufferView.buffer = 0;
+        posBufferView.byteOffset = posOffset;
+        posBufferView.byteLength = posBytes;
         posBufferView.target = TINYGLTF_TARGET_ARRAY_BUFFER;
         int posViewIdx = (int)model.bufferViews.size();
         model.bufferViews.push_back(posBufferView);
@@ -752,16 +791,16 @@ static bool ExportGLB(const std::string& filename) {
         posAccessorByType[t] = (int)model.accessors.size();
         model.accessors.push_back(posAccessor);
 
-        tinygltf::Buffer idxBuffer;
-        idxBuffer.data.resize(indices.size() * sizeof(uint16_t));
-        std::memcpy(idxBuffer.data.data(), indices.data(), idxBuffer.data.size());
-        int idxBufIdx = (int)model.buffers.size();
-        model.buffers.push_back(idxBuffer);
+        while (binary.size() % 4 != 0) binary.push_back(0);
+        const size_t idxOffset = binary.size();
+        const size_t idxBytes = indices.size() * sizeof(uint16_t);
+        binary.resize(idxOffset + idxBytes);
+        std::memcpy(binary.data() + idxOffset, indices.data(), idxBytes);
 
         tinygltf::BufferView idxBufferView;
-        idxBufferView.buffer = idxBufIdx;
-        idxBufferView.byteOffset = 0;
-        idxBufferView.byteLength = idxBuffer.data.size();
+        idxBufferView.buffer = 0;
+        idxBufferView.byteOffset = idxOffset;
+        idxBufferView.byteLength = idxBytes;
         idxBufferView.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
         int idxViewIdx = (int)model.bufferViews.size();
         model.bufferViews.push_back(idxBufferView);
