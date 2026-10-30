@@ -40,7 +40,12 @@ jobs:
         run: gh run download "$SOURCE_RUN" --name lua3d-windows-x64 --dir build/artifact
       - name: Package executable, instructions and licenses
         if: steps.state.outputs.published != 'true'
-        run: python tools/package_release.py --artifact-dir build/artifact --output-dir build/release
+        run: |
+          python tools/package_release.py --artifact-dir build/artifact --output-dir build/release
+          test -s build/release/Lunoryx-v0.1.0-alpha.1-windows-x64.zip
+          test -s build/release/Lunoryx.exe
+          test -s build/release/SDL2.dll
+          test -s build/release/SHA256SUMS.txt
       - name: Create draft and upload verified files
         if: steps.state.outputs.published != 'true'
         run: |

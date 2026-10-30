@@ -24,7 +24,7 @@ def package(artifact, output):
     validate_pe(artifact / 'engine.exe')
     validate_pe(artifact / 'SDL2.dll')
     output.mkdir(parents=True, exist_ok=True)
-    stage = output / f'{NAME}-{VERSION}-windows-x64'
+    stage = output / f'{NAME}-v{VERSION}-windows-x64'
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir()
