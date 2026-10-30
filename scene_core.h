@@ -3,6 +3,9 @@
 #include <string>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <algorithm>
+#include <limits>
 
 static const float PI = 3.14159265358979323846f;
 
@@ -37,8 +40,18 @@ static MeshType ParseMeshType(const std::string& typeStr) {
     return MeshType::Cube;
 }
 
+struct ObjectProperty {
+    enum Kind { Number, Boolean, Text } Type = Number;
+    double NumberValue = 0.0;
+    bool BoolValue = false;
+    std::string TextValue;
+};
+
 // Enhanced GameObject structure (Rotation is stored in degrees for UI clarity and converted to radians on GLB export)
+inline uint64_t NewObjectId() { static uint64_t next=0; return ++next; }
+
 struct GameObject {
+    uint64_t Id = NewObjectId();
     std::string Name;
     MeshType Type = MeshType::Cube;
     float Position[3] = {0.0f, 0.0f, 0.0f};
@@ -49,6 +62,21 @@ struct GameObject {
     float Roughness   = 0.5f;
     bool Visible      = true;
     bool Wireframe    = false;
+    bool Selected = false;
+    bool Dynamic = false;
+    bool Grounded = false;
+    bool Character = false;
+    float Mass = 1.0f;
+    float Restitution = 0.2f;
+    float Friction = 4.0f;
+    float Velocity[3] = {0, 0, 0};
+    float MoveSpeed = 4.5f;
+    float JumpSpeed = 6.0f;
+    // Empty geometry means a procedural primitive. Custom meshes use 32-bit indices.
+    std::vector<float> Vertices;
+    std::vector<uint32_t> Indices;
+    std::vector<float> VertexColors;
+    std::map<std::string, ObjectProperty> Properties;
 
     GameObject(const std::string& name, MeshType type = MeshType::Cube)
         : Name(name), Type(type) {}
@@ -174,9 +202,11 @@ static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPosi
 
 // Copy before growing the vector: callers may reference an element of objects.
 static int DuplicateObject(std::vector<GameObject>& objects, int index, const std::string& name) {
-    if (index < 0 || static_cast<size_t>(index) >= objects.size()) return -1;
+    if (index < 0 || static_cast<size_t>(index) >= objects.size() || name.size()>255) return -1;
     GameObject copy = objects[index];
     copy.Name = name;
+    copy.Selected = false;
+    copy.Id = NewObjectId();
     objects.push_back(copy);
     return static_cast<int>(objects.size()) - 1;
 }

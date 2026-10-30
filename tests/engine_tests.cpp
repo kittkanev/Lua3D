@@ -91,8 +91,8 @@ int main() {
         assert(view.byteOffset + view.byteLength <= model.buffers[0].data.size());
     }
     for (int type = 0; type < 5; ++type) {
-        std::vector<float> vertices; std::vector<uint16_t> indices;
-        GeneratePrimitiveMeshData(static_cast<MeshType>(type), vertices, indices);
+        std::vector<float> vertices; std::vector<uint32_t> indices;
+        ObjectMesh(g_Objects[size_t(type)], vertices, indices);
         const auto& primitive = model.meshes.at(model.nodes.at(type).mesh).primitives.at(0);
         const auto& p = model.accessors.at(primitive.attributes.at("POSITION"));
         const auto& i = model.accessors.at(primitive.indices);
@@ -100,9 +100,71 @@ int main() {
         const auto& iv = model.bufferViews.at(i.bufferView);
         assert(p.count == vertices.size()/3 && i.count == indices.size());
         assert(std::memcmp(model.buffers[0].data.data()+pv.byteOffset, vertices.data(), vertices.size()*sizeof(float)) == 0);
-        assert(std::memcmp(model.buffers[0].data.data()+iv.byteOffset, indices.data(), indices.size()*sizeof(uint16_t)) == 0);
+        assert(std::memcmp(model.buffers[0].data.data()+iv.byteOffset, indices.data(), indices.size()*sizeof(uint32_t)) == 0);
     }
+    CheckLua(R"(
+        local clay=add_object('Clay','sphere')
+        assert(make_editable(clay,1))
+        assert(not make_editable(clay,-1))
+        assert(not pcall(sculpt,clay,0,0,0,1,0/0))
+        assert(not sculpt(clay,0,0,0,0,1))
+        assert(sculpt(clay,0,0.5,0,1,0.1,0))
+        set_position(clay,2,0,0)
+        local player=add_character('Player',2,0.65,0.45)
+        assert(player>=0 and add_character('Invalid',0)==-1)
+        assert(set_character(player,true,5,7))
+        assert(not pcall(set_character,player,true,math.huge,7))
+        assert(set_physics(player,true,3,0))
+        assert(not pcall(set_physics,player,true,-1,0))
+        assert(set_velocity(player,1,2,3))
+        assert(not pcall(set_velocity,player,0,0,math.huge))
+        local x,y,z=get_velocity(player);assert(x==1 and y==2 and z==3)
+        assert(set_property(player,'Health',100))
+        assert(set_property(player,'Name','Hero'))
+        assert(set_property(player,'Enabled',true))
+        assert(not set_property(player,'',1))
+        assert(not pcall(set_property,player,'Bad',{}))
+        assert(not pcall(set_property,player,'Health',0/0))
+        assert(get_property(player,'Health')==100)
+        assert(get_property(player,'Name')=='Hero')
+        assert(get_property(player,'Enabled')==true)
+        assert(set_property(player,'Name',nil) and get_property(player,'Name')==nil)
+        assert(set_skybox('night') and not set_skybox('invalid'))
+        assert(merge_objects({clay,99999},'bad')==-1)
+        local joined=merge_objects({clay,player},'Joined');assert(joined>=0)
+        assert(export_glb('tests/test-scene.glb'))
+    )");
+    assert(reader.LoadBinaryFromFile(&model,&err,&warn,"tests/test-scene.glb"));
+    const auto& joined=model.meshes.back().primitives[0];
+    assert(joined.attributes.count("COLOR_0")==1);
+    int index=int(g_Objects.size())-1;
+    auto original=g_Objects[size_t(index)].Position[1];g_Objects[size_t(index)].Dynamic=true;
+    StartSimulation();AdvancePhysics(g_Objects,g_Physics,.1f);StopSimulation();
+    assert(g_Objects[size_t(index)].Position[1]==original&&!g_PhysicsRunning);
     if (!std::getenv("KEEP_TEST_GLB")) std::remove("tests/test-scene.glb");
+    InitializeStudio();
+    std::snprintf(g_Studio.Scripts[0].Code,sizeof(g_Studio.Scripts[0].Code),"print('loaded only on explicit Run')");
+    ObjectProperty property;property.NumberValue=42;assert(SetProperty(g_Objects[0],"Health",property));
+    g_Studio.Scripts[1].Allocated=true;g_Studio.Scripts[1].Open=false;std::snprintf(g_Studio.Scripts[1].Name,sizeof(g_Studio.Scripts[1].Name),"Closed.lua");
+    auto savedName=g_Objects[0].Name;size_t savedCount=g_Objects.size();
+    assert(SaveStudioProject("tests/test-project.lunoryx"));
+    assert(SaveStudioProject("tests/test-project.lunoryx")); // replacing an existing save works on Windows too
+    g_Objects[0].Name="changed";
+    assert(LoadStudioProject("tests/test-project.lunoryx"));
+    assert(g_Objects.size()==savedCount&&g_Objects[0].Name==savedName);
+    assert(g_Objects[0].Properties.at("Health").NumberValue==42);
+    assert(std::strstr(g_Studio.Scripts[0].Code,"explicit Run"));
+    assert(g_Studio.Scripts[1].Allocated&&!g_Studio.Scripts[1].Open);
+    CheckLua("assert(rawget(_G, 'on_update')==nil)");
+    assert(!SaveStudioProject("tests/nonexistent-directory/project.lunoryx"));
+    assert(!LoadStudioProject("tests/missing-project.lunoryx"));
+    {std::ofstream broken("tests/broken-project.lunoryx");broken<<"{bad json";}
+    assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects[0].Name==savedName);
+    nlohmann::json corrupt;{std::ifstream f("tests/test-project.lunoryx");f>>corrupt;}
+    corrupt["objects"].back()["indices"][0]=4294967295u;
+    {std::ofstream broken("tests/broken-project.lunoryx");broken<<corrupt;}
+    assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects.size()==savedCount);
+    std::remove("tests/test-project.lunoryx");std::remove("tests/broken-project.lunoryx");
     ShutdownLuaState();
     for (int run = 0; run < 50; ++run) {
         InitLuaState();

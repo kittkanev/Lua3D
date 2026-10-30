@@ -22,11 +22,13 @@ jobs:
       - name: Validate binary glTF independently
         run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb
       - name: Smoke test editor and timeout
-        run: timeout 30s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 ./engine
+        run: mkdir -p build && timeout 30s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
       - uses: actions/upload-artifact@v4
         with:
           name: gltf-validation
-          path: tests/test-scene.glb.validation.json
+          path: |
+            tests/test-scene.glb.validation.json
+            build/studio-smoke.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
@@ -44,13 +46,12 @@ jobs:
       - name: Prepare verified Lua and SDL2 dependencies
         run: bash tools/prepare_mingw.sh
       - name: Build editor and Windows tests
-        run: make -j2 -f Makefile.win package
+        run: make -j2 -f Makefile.win package && python tools/verify_windows.py build/win/engine.exe
       - uses: actions/upload-artifact@v4
         with:
           name: lua3d-windows-x64
           path: |
             build/win/*.exe
-            build/win/SDL2.dll
             build/win/README.md
             build/win/examples/
             build/win/docs/

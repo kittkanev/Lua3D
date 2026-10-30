@@ -16,7 +16,7 @@ IMGUI_SRC = \
 
 SRC = main.cpp $(IMGUI_SRC)
 OBJS = $(SRC:.cpp=.o)
-DEPS = $(OBJS:.o=.d)
+DEPS = $(OBJS:.o=.d) tests/engine_tests.d
 
 all: engine
 
@@ -37,11 +37,11 @@ clean:
 test: tests/core_tests
 	./tests/core_tests
 
-tests/core_tests: tests/core_tests.cpp scene_core.h
+tests/core_tests: tests/core_tests.cpp scene_core.h scene_tools.h
 	$(CXX) -std=c++11 -Wall -Wextra -pedantic -Werror -O2 $< -o $@
 
 test-integration: tests/engine_tests
 	./tests/engine_tests
 
-tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h engine_version.h $(filter-out main.o,$(OBJS))
+tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h scene_tools.h engine_version.h $(filter-out main.o,$(OBJS))
 	$(CXX) $(CXXFLAGS) tests/engine_tests.cpp $(filter-out main.o,$(OBJS)) -o $@ $(LDFLAGS)

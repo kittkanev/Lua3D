@@ -1,5 +1,5 @@
 #include <SDL.h>
-#include <GL/gl.h>
+#include <SDL_opengl.h>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -25,7 +25,7 @@ extern "C" {
 // tinygltf requires json
 #include <tiny_gltf.h>
 
-#include "scene_core.h"
+#include "scene_tools.h"
 #include "engine_version.h"
 #include <limits>
 #include <exception>
@@ -45,6 +45,26 @@ char g_OutlinerFilter[128] = "";
 
 std::vector<std::string> g_ConsoleLines;
 std::string g_ConsoleOutput = "";
+
+bool g_PhysicsRunning=false;
+PhysicsState g_Physics;
+std::vector<GameObject> g_PlaySnapshot;
+int g_SkyPreset=0;
+float g_SkyTop[3]={.12f,.31f,.58f},g_SkyBottom[3]={.64f,.8f,.94f};
+static void ApplySkyPreset(int preset) {
+    static const float top[][3]={{.12f,.31f,.58f},{.19f,.08f,.3f},{.005f,.012f,.04f}};
+    static const float bottom[][3]={{.64f,.8f,.94f},{1,.38f,.16f},{.06f,.11f,.22f}};
+    if(preset<0||preset>2)return;
+    g_SkyPreset=preset;std::copy(top[preset],top[preset]+3,g_SkyTop);std::copy(bottom[preset],bottom[preset]+3,g_SkyBottom);
+}
+static void StartSimulation() {
+    if(!g_PhysicsRunning)g_PlaySnapshot=g_Objects;
+    g_Physics.Accumulator=0;g_PhysicsRunning=true;g_SimulationRunning=true;
+}
+static void StopSimulation() {
+    if(g_PhysicsRunning)g_Objects=g_PlaySnapshot;
+    g_PhysicsRunning=false;g_SimulationRunning=false;g_Physics.Accumulator=0;g_SelectedObjectIndex=-1;
+}
 
 char g_ScriptBuffer[1024 * 16] =
     "-- Lunoryx: Interactive Demo Script\n"
@@ -216,9 +236,15 @@ static std::string LuaErrorText(lua_State* L) {
     return message ? message : luaL_typename(L, -1);
 }
 
+static const char* CheckObjectName(lua_State* L,int argument) {
+    size_t length=0;const char* name=luaL_checklstring(L,argument,&length);
+    if(length>255||std::memchr(name,'\0',length))luaL_argerror(L,argument,"name must be at most 255 bytes, without embedded NUL");
+    return name;
+}
+
 // Lua: add_object(name, [type]) -> index (0-based)
 static int l_add_object(lua_State *L) {
-    const char* name = luaL_checkstring(L, 1);
+    const char* name = CheckObjectName(L, 1);
     MeshType type = MeshType::Cube;
     if (lua_gettop(L) >= 2 && lua_isstring(L, 2)) {
         type = ParseMeshType(lua_tostring(L, 2));
@@ -258,7 +284,7 @@ static int l_clear_scene(lua_State *L) {
 
 // Lua: find_object(name) -> index or -1
 static int l_find_object(lua_State *L) {
-    const char* name = luaL_checkstring(L, 1);
+    const char* name = CheckObjectName(L, 1);
     for (size_t i = 0; i < g_Objects.size(); ++i) {
         if (g_Objects[i].Name == name) {
             lua_pushinteger(L, (lua_Integer)i);
@@ -461,7 +487,7 @@ static int l_duplicate_object(lua_State* L) {
 
 static int l_set_name(lua_State* L) {
     lua_Integer index = luaL_checkinteger(L, 1);
-    const char* name = luaL_checkstring(L, 2);
+    const char* name = CheckObjectName(L, 2);
     bool valid = index >= 0 && index < static_cast<lua_Integer>(g_Objects.size());
     if (valid) g_Objects[index].Name = name;
     lua_pushboolean(L, valid);
@@ -489,11 +515,24 @@ static int l_get_material(lua_State* L) {
     return 2;
 }
 
+#include "scene_bindings.h"
+
 static void InitLuaState() {
     ShutdownLuaState();
     g_LuaState = luaL_newstate();
     if (!g_LuaState) throw std::bad_alloc();
     luaL_openlibs(g_LuaState);
+    lua_register(g_LuaState, "make_editable", LuaBinding<l_make_editable>);
+    lua_register(g_LuaState, "sculpt", LuaBinding<l_sculpt>);
+    lua_register(g_LuaState, "merge_objects", LuaBinding<l_merge_objects>);
+    lua_register(g_LuaState, "set_physics", LuaBinding<l_set_physics>);
+    lua_register(g_LuaState, "set_velocity", LuaBinding<l_set_velocity>);
+    lua_register(g_LuaState, "get_velocity", LuaBinding<l_get_velocity>);
+    lua_register(g_LuaState, "set_character", LuaBinding<l_set_character>);
+    lua_register(g_LuaState, "add_character", LuaBinding<l_add_character>);
+    lua_register(g_LuaState, "set_property", LuaBinding<l_set_property>);
+    lua_register(g_LuaState, "get_property", LuaBinding<l_get_property>);
+    lua_register(g_LuaState, "set_skybox", LuaBinding<l_set_skybox>);
     lua_register(g_LuaState, "duplicate_object", LuaBinding<l_duplicate_object>);
     lua_register(g_LuaState, "set_name", LuaBinding<l_set_name>);
     lua_register(g_LuaState, "set_material", LuaBinding<l_set_material>);
@@ -775,139 +814,55 @@ static void RenderGrid() {
     glEnd();
 }
 
-// Fixes Bug #1 (writeBinary = true for real binary .glb with glTF magic header) and Bug #2 (degrees -> radians)
-static bool ExportGLB(const std::string& filename) {
-    tinygltf::Model model;
-    tinygltf::Scene scene;
-    scene.name = LUNORYX_NAME " Scene";
-
-    tinygltf::Asset asset;
-    asset.version = "2.0";
-    asset.generator = LUNORYX_NAME " " LUNORYX_VERSION;
-    model.asset = asset;
-
-    int posAccessorByType[5] = {-1, -1, -1, -1, -1};
-    int idxAccessorByType[5] = {-1, -1, -1, -1, -1};
-
-    model.buffers.emplace_back();
-    std::vector<unsigned char>& binary = model.buffers[0].data;
-
-    for (int t = 0; t < 5; ++t) {
-        std::vector<float> positions;
-        std::vector<uint16_t> indices;
-        GeneratePrimitiveMeshData((MeshType)t, positions, indices);
-
-        double minV[3] = { 1e9,  1e9,  1e9};
-        double maxV[3] = {-1e9, -1e9, -1e9};
-        for (size_t v = 0; v + 2 < positions.size(); v += 3) {
-            for (int c = 0; c < 3; ++c) {
-                minV[c] = std::min(minV[c], (double)positions[v + c]);
-                maxV[c] = std::max(maxV[c], (double)positions[v + c]);
-            }
-        }
-
-        while (binary.size() % 4 != 0) binary.push_back(0);
-        const size_t posOffset = binary.size();
-        const size_t posBytes = positions.size() * sizeof(float);
-        binary.resize(posOffset + posBytes);
-        std::memcpy(binary.data() + posOffset, positions.data(), posBytes);
-
-        tinygltf::BufferView posBufferView;
-        posBufferView.buffer = 0;
-        posBufferView.byteOffset = posOffset;
-        posBufferView.byteLength = posBytes;
-        posBufferView.target = TINYGLTF_TARGET_ARRAY_BUFFER;
-        int posViewIdx = (int)model.bufferViews.size();
-        model.bufferViews.push_back(posBufferView);
-
-        tinygltf::Accessor posAccessor;
-        posAccessor.bufferView = posViewIdx;
-        posAccessor.byteOffset = 0;
-        posAccessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
-        posAccessor.count = positions.size() / 3;
-        posAccessor.type = TINYGLTF_TYPE_VEC3;
-        posAccessor.minValues = {minV[0], minV[1], minV[2]};
-        posAccessor.maxValues = {maxV[0], maxV[1], maxV[2]};
-        posAccessorByType[t] = (int)model.accessors.size();
-        model.accessors.push_back(posAccessor);
-
-        while (binary.size() % 4 != 0) binary.push_back(0);
-        const size_t idxOffset = binary.size();
-        const size_t idxBytes = indices.size() * sizeof(uint16_t);
-        binary.resize(idxOffset + idxBytes);
-        std::memcpy(binary.data() + idxOffset, indices.data(), idxBytes);
-
-        tinygltf::BufferView idxBufferView;
-        idxBufferView.buffer = 0;
-        idxBufferView.byteOffset = idxOffset;
-        idxBufferView.byteLength = idxBytes;
-        idxBufferView.target = TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER;
-        int idxViewIdx = (int)model.bufferViews.size();
-        model.bufferViews.push_back(idxBufferView);
-
-        tinygltf::Accessor idxAccessor;
-        idxAccessor.bufferView = idxViewIdx;
-        idxAccessor.byteOffset = 0;
-        idxAccessor.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
-        idxAccessor.count = indices.size();
-        idxAccessor.type = TINYGLTF_TYPE_SCALAR;
-        idxAccessorByType[t] = (int)model.accessors.size();
-        model.accessors.push_back(idxAccessor);
-    }
-
-    for (size_t i = 0; i < g_Objects.size(); ++i) {
-        const GameObject& obj = g_Objects[i];
-        if (!obj.Visible) continue;
-
-        int typeIdx = (int)obj.Type;
-        if (typeIdx < 0 || typeIdx >= 5) typeIdx = 0;
-
-        tinygltf::Material mat;
-        mat.name = obj.Name + "_Mat";
-        mat.pbrMetallicRoughness.baseColorFactor = {
-            obj.Color[0], obj.Color[1], obj.Color[2], 1.0
-        };
-        mat.pbrMetallicRoughness.metallicFactor = obj.Metallic;
-        mat.pbrMetallicRoughness.roughnessFactor = obj.Roughness;
-        int matIndex = (int)model.materials.size();
-        model.materials.push_back(mat);
-
-        tinygltf::Mesh mesh;
-        mesh.name = obj.Name + "_Mesh";
-        tinygltf::Primitive primitive;
-        primitive.attributes["POSITION"] = posAccessorByType[typeIdx];
-        primitive.indices = idxAccessorByType[typeIdx];
-        primitive.material = matIndex;
-        primitive.mode = TINYGLTF_MODE_TRIANGLES;
-        mesh.primitives.push_back(primitive);
-        int meshIndex = (int)model.meshes.size();
-        model.meshes.push_back(mesh);
-
-        tinygltf::Node node;
-        node.name = obj.Name;
-        node.mesh = meshIndex;
-        node.translation = {obj.Position[0], obj.Position[1], obj.Position[2]};
-        node.rotation = EulerDegreesToQuaternion(obj.Rotation[0], obj.Rotation[1], obj.Rotation[2]);
-        node.scale = {obj.Scale[0], obj.Scale[1], obj.Scale[2]};
-
-        int nodeIndex = (int)model.nodes.size();
-        model.nodes.push_back(node);
-        scene.nodes.push_back(nodeIndex);
-    }
-
-    model.scenes.push_back(scene);
-    model.defaultScene = 0;
-
-    tinygltf::TinyGLTF writer;
-    // Last argument MUST be true to write binary .glb (fixes Bug #1)
-    return writer.WriteGltfSceneToFile(&model, filename, true, true, true, true);
+static int ExportAccessor(tinygltf::Model& model,const void* data,size_t bytes,size_t count,int component,int type,int target,const std::vector<double>& lo={},const std::vector<double>& hi={}) {
+    auto& binary=model.buffers[0].data;
+    while(binary.size()%4)binary.push_back(0);
+    tinygltf::BufferView view;view.buffer=0;view.byteOffset=binary.size();view.byteLength=bytes;view.target=target;
+    size_t offset=binary.size();binary.resize(offset+bytes);std::memcpy(binary.data()+offset,data,bytes);
+    int viewIndex=int(model.bufferViews.size());model.bufferViews.push_back(view);
+    tinygltf::Accessor accessor;accessor.bufferView=viewIndex;accessor.componentType=component;accessor.type=type;accessor.count=count;
+    accessor.minValues=lo;accessor.maxValues=hi;
+    model.accessors.push_back(accessor);return int(model.accessors.size())-1;
 }
+
+static bool ExportGLB(const std::string& filename) {
+    if(filename.empty()||filename.find('\0')!=std::string::npos)return false;
+    tinygltf::Model model;model.asset.version="2.0";model.asset.generator=LUNORYX_NAME " " LUNORYX_VERSION;
+    model.buffers.emplace_back();tinygltf::Scene scene;scene.name=LUNORYX_NAME " Scene";
+    for(const auto& obj:g_Objects) {
+        if(!obj.Visible)continue;
+        std::vector<float> p;std::vector<uint32_t> indices;ObjectMesh(obj,p,indices);
+        if(p.empty()||indices.empty())return false;
+        std::vector<double> lo={p[0],p[1],p[2]},hi=lo;
+        for(size_t i=0;i<p.size();i+=3)for(int k=0;k<3;++k){if(!std::isfinite(p[i+k]))return false;lo[k]=std::min(lo[k],double(p[i+k]));hi[k]=std::max(hi[k],double(p[i+k]));}
+        int positions=ExportAccessor(model,p.data(),p.size()*sizeof(float),p.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER,lo,hi);
+        int elements=ExportAccessor(model,indices.data(),indices.size()*sizeof(uint32_t),indices.size(),TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT,TINYGLTF_TYPE_SCALAR,TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);
+        tinygltf::Material material;material.name=obj.Name+" Material";
+        material.pbrMetallicRoughness.baseColorFactor={obj.Color[0],obj.Color[1],obj.Color[2],1};
+        material.pbrMetallicRoughness.metallicFactor=obj.Metallic;material.pbrMetallicRoughness.roughnessFactor=obj.Roughness;
+        material.doubleSided=obj.Type==MeshType::Plane;
+        int materialIndex=int(model.materials.size());model.materials.push_back(material);
+        tinygltf::Primitive primitive;primitive.attributes["POSITION"]=positions;primitive.indices=elements;primitive.material=materialIndex;primitive.mode=TINYGLTF_MODE_TRIANGLES;
+        if(!obj.VertexColors.empty())primitive.attributes["COLOR_0"]=ExportAccessor(model,obj.VertexColors.data(),obj.VertexColors.size()*sizeof(float),obj.VertexColors.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER);
+        tinygltf::Mesh mesh;mesh.name=obj.Name;mesh.primitives.push_back(primitive);
+        tinygltf::Node node;node.name=obj.Name;node.mesh=int(model.meshes.size());
+        node.translation={obj.Position[0],obj.Position[1],obj.Position[2]};node.scale={obj.Scale[0],obj.Scale[1],obj.Scale[2]};
+        node.rotation=EulerDegreesToQuaternion(obj.Rotation[0],obj.Rotation[1],obj.Rotation[2]);
+        model.meshes.push_back(mesh);scene.nodes.push_back(int(model.nodes.size()));model.nodes.push_back(node);
+    }
+    if(model.buffers[0].data.empty())model.buffers.clear();
+    model.scenes.push_back(scene);model.defaultScene=0;
+    tinygltf::TinyGLTF writer;return writer.WriteGltfSceneToFile(&model,filename,true,true,true,true);
+}
+
+#include "editor_ui.h"
+#include "assets/logo_data.h"
 
 int main(int argc, char* argv[]) {
     (void)argc; (void)argv;
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
-        std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx - SDL initialization failed",SDL_GetError(),nullptr);
         return 1;
     }
 
@@ -924,14 +879,14 @@ int main(int argc, char* argv[]) {
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_Window* window = SDL_CreateWindow(LUNORYX_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1360, 800, window_flags);
     if (!window) {
-        std::cerr << "Error creating SDL Window: " << SDL_GetError() << std::endl;
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx - Window creation failed",SDL_GetError(),nullptr);
         SDL_Quit();
         return 1;
     }
 
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
     if (!gl_context) {
-        std::cerr << "Error creating OpenGL context: " << SDL_GetError() << std::endl;
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx - OpenGL initialization failed",SDL_GetError(),window);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
@@ -944,21 +899,46 @@ int main(int argc, char* argv[]) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.IniFilename=nullptr; // Built-in layout; no external configuration is required.
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
     style.FrameRounding = 4.0f;
+    style.TabRounding=5;style.WindowPadding=ImVec2(10,8);
+    style.Colors[ImGuiCol_WindowBg]=ImVec4(.055f,.072f,.105f,1);
+    style.Colors[ImGuiCol_Header]=ImVec4(.10f,.28f,.34f,1);
+    style.Colors[ImGuiCol_HeaderHovered]=ImVec4(.13f,.4f,.46f,1);
+    style.Colors[ImGuiCol_Button]=ImVec4(.10f,.24f,.3f,1);
+    style.Colors[ImGuiCol_ButtonHovered]=ImVec4(.13f,.38f,.44f,1);
+    style.Colors[ImGuiCol_CheckMark]=ImVec4(.4f,.9f,.9f,1);
     style.WindowRounding = 5.0f;
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
+    if(!g_ViewportTarget.Initialize()) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx","OpenGL framebuffer support is required. Please update your GPU driver.",window);
+        g_ViewportTarget.Destroy();ImGui_ImplOpenGL3_Shutdown();ImGui_ImplSDL2_Shutdown();ImGui::DestroyContext();SDL_GL_DeleteContext(gl_context);SDL_DestroyWindow(window);SDL_Quit();return 1;
+    }
+    int logoWidth=0,logoHeight=0,channels=0;
+    unsigned char* logo=stbi_load_from_memory(kLogoPng,int(sizeof(kLogoPng)),&logoWidth,&logoHeight,&channels,4);
+    if(logo) {
+        SDL_Surface* icon=SDL_CreateRGBSurfaceWithFormatFrom(logo,logoWidth,logoHeight,32,logoWidth*4,SDL_PIXELFORMAT_RGBA32);
+        if(icon){SDL_SetWindowIcon(window,icon);SDL_FreeSurface(icon);}
+        glGenTextures(1,&g_LogoTexture);glBindTexture(GL_TEXTURE_2D,g_LogoTexture);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,logoWidth,logoHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,logo);glBindTexture(GL_TEXTURE_2D,0);stbi_image_free(logo);
+    }
+    InitializeStudio();
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
 
     const Uint32 start_time = SDL_GetTicks();
     const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
 
+    const char* capturePath=std::getenv("LUNORYX_CAPTURE_PATH");
+    int captureFrame=0,uiSmokeFrame=0;
+    const bool uiSmoke=std::getenv("LUNORYX_UI_SMOKE")!=nullptr;
     bool done = false;
     float cameraDistance = 10.0f;
     float cameraAngleX = 25.0f;
@@ -973,6 +953,14 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        if(uiSmoke) {
+            ++uiSmokeFrame;
+            if(uiSmokeFrame==3||uiSmokeFrame==6){SDL_Event key={};key.type=SDL_KEYDOWN;key.key.keysym.sym=SDLK_F11;SDL_PushEvent(&key);}
+            if(uiSmokeFrame==9){NewScript();g_Studio.ShowDocs=true;}
+            if(uiSmokeFrame==12){g_Studio.RequestDocument=-2;g_Studio.ResetLayout=true;}
+            if(uiSmokeFrame==15){CreateCharacter(g_Objects,"Smoke Player",g_Studio.Character);StartSimulation();}
+            if(uiSmokeFrame==18)StopSimulation();
+        }
         float dt = (float)(currentTicks - lastTicks) / 1000.0f;
         if (dt > 0.1f) dt = 0.1f;
         lastTicks = currentTicks;
@@ -985,13 +973,19 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
                 done = true;
 
-            if (!io.WantCaptureMouse) {
+            if(event.type==SDL_KEYDOWN&&!event.key.repeat) {
+                if(event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
+                if(event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
+                if(event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
+            }
+            int mouseX=0,mouseY=0;SDL_GetMouseState(&mouseX,&mouseY);
+            if (SceneContains(float(mouseX),float(mouseY))) {
                 if (event.type == SDL_MOUSEWHEEL) {
                     cameraDistance -= event.wheel.y * 0.8f;
                     cameraDistance = std::max(1.5f, std::min(50.0f, cameraDistance));
                 } else if (event.type == SDL_MOUSEMOTION) {
                     if (event.motion.state & SDL_BUTTON_RMASK) {
-                        cameraAngleY += event.motion.xrel * 0.4f;
+                        cameraAngleY = WrapYaw(cameraAngleY + event.motion.xrel * 0.4f);
                         cameraAngleX += event.motion.yrel * 0.4f;
                         cameraAngleX = std::max(-89.0f, std::min(89.0f, cameraAngleX));
                     } else if (event.motion.state & SDL_BUTTON_MMASK) {
@@ -1003,6 +997,20 @@ int main(int argc, char* argv[]) {
         }
 
         UpdateLuaScript(dt);
+        if(g_PhysicsRunning) {
+            if(g_Studio.SceneActive&&!io.WantTextInput) {
+                const Uint8* keys=SDL_GetKeyboardState(nullptr);
+                for(auto& object:g_Objects)if(object.Character&&object.Dynamic) {
+                    float x=float(keys[SDL_SCANCODE_D])-float(keys[SDL_SCANCODE_A]);
+                    float z=float(keys[SDL_SCANCODE_S])-float(keys[SDL_SCANCODE_W]);
+                    float length=std::sqrt(x*x+z*z);if(length>0){x/=length;z/=length;}
+                    float angle=-cameraAngleY*PI/180,c=std::cos(angle),sn=std::sin(angle);
+                    object.Velocity[0]=(x*c+z*sn)*object.MoveSpeed;object.Velocity[2]=(-x*sn+z*c)*object.MoveSpeed;
+                    if(keys[SDL_SCANCODE_SPACE]&&object.Grounded)object.Velocity[1]=object.JumpSpeed;
+                }
+            }
+            AdvancePhysics(g_Objects,g_Physics,dt);
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
@@ -1024,10 +1032,14 @@ int main(int argc, char* argv[]) {
         ImGui::PopStyleVar(3);
 
         ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+        BuildStudioLayout(dockspace_id,viewport);
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
+                ImGui::InputText("Project path",g_ProjectPath,sizeof(g_ProjectPath));
+                if(ImGui::MenuItem("Save Project"))SaveStudioProject(g_ProjectPath);
+                if(ImGui::MenuItem("Load Project"))LoadStudioProject(g_ProjectPath);
                 if (ImGui::MenuItem("Export GLB")) {
                     if (ExportGLB("export.glb")) {
                         AppendConsole("> Exported binary scene to export.glb\n");
@@ -1049,6 +1061,7 @@ int main(int argc, char* argv[]) {
                 ImGui::MenuItem("Global Wireframe", nullptr, &g_GlobalWireframe);
                 ImGui::EndMenu();
             }
+            StudioMenu();
             ImGui::Separator();
             if (ImGui::Button(g_SimulationRunning ? "Pause Lua (on_update)" : "Play Lua (on_update)")) {
                 g_SimulationRunning = !g_SimulationRunning;
@@ -1058,222 +1071,7 @@ int main(int argc, char* argv[]) {
         }
         ImGui::End();
 
-        // 1. Viewport Controls Panel (Fixes Bug #8: real interactive 3D viewport controls instead of static text)
-        ImGui::Begin("Viewport");
-        ImGui::TextDisabled("RMB Drag: Orbit | MMB Drag: Pan | Wheel: Zoom");
-        ImGui::SliderFloat("Distance", &cameraDistance, 1.5f, 50.0f);
-        ImGui::SliderFloat("Pitch (deg)", &cameraAngleX, -89.0f, 89.0f);
-        ImGui::SliderFloat("Yaw (deg)", &cameraAngleY, -180.0f, 180.0f);
-        ImGui::DragFloat3("Target", cameraTarget, 0.1f);
-        if (ImGui::Button("Iso"))   { cameraAngleX = 25.0f; cameraAngleY = -35.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Top"))   { cameraAngleX = 89.0f; cameraAngleY = 0.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Front")) { cameraAngleX = 0.0f;  cameraAngleY = 0.0f; }
-        ImGui::SameLine();
-        if (ImGui::Button("Reset")) {
-            cameraTarget[0] = 0.0f; cameraTarget[1] = 1.0f; cameraTarget[2] = 0.0f;
-            cameraDistance = 10.0f;
-        }
-        ImGui::End();
-
-        // 2. World Outliner Panel
-        ImGui::Begin("World Outliner");
-        if (ImGui::Button("+ Cube"))     g_Objects.emplace_back("Cube " + std::to_string(g_Objects.size() + 1), MeshType::Cube);
-        ImGui::SameLine();
-        if (ImGui::Button("+ Pyramid"))  g_Objects.emplace_back("Pyramid " + std::to_string(g_Objects.size() + 1), MeshType::Pyramid);
-        ImGui::SameLine();
-        if (ImGui::Button("+ Sphere"))   g_Objects.emplace_back("Sphere " + std::to_string(g_Objects.size() + 1), MeshType::Sphere);
-        if (ImGui::Button("+ Cylinder")) g_Objects.emplace_back("Cylinder " + std::to_string(g_Objects.size() + 1), MeshType::Cylinder);
-        ImGui::SameLine();
-        if (ImGui::Button("+ Plane"))    g_Objects.emplace_back("Plane " + std::to_string(g_Objects.size() + 1), MeshType::Plane);
-
-        ImGui::Separator();
-        ImGui::InputTextWithHint("##Filter", "Search objects...", g_OutlinerFilter, sizeof(g_OutlinerFilter));
-        ImGui::Separator();
-
-        for (int i = 0; i < (int)g_Objects.size(); i++) {
-            if (g_OutlinerFilter[0] != '\0' && g_Objects[i].Name.find(g_OutlinerFilter) == std::string::npos) {
-                continue;
-            }
-            char label[192];
-            snprintf(label, sizeof(label), "[%s] %s%s##%d",
-                     GetMeshTypeName(g_Objects[i].Type),
-                     g_Objects[i].Name.c_str(),
-                     g_Objects[i].Visible ? "" : " (Hidden)",
-                     i);
-            if (ImGui::Selectable(label, g_SelectedObjectIndex == i)) {
-                g_SelectedObjectIndex = i;
-            }
-        }
-        ImGui::End();
-
-        // 3. Details Panel (Fixes Bug #2: Rotation explicitly labeled and edited in degrees)
-        ImGui::Begin("Details");
-        if (g_SelectedObjectIndex >= 0 && g_SelectedObjectIndex < (int)g_Objects.size()) {
-            GameObject& obj = g_Objects[g_SelectedObjectIndex];
-            char nameBuf[128];
-            snprintf(nameBuf, sizeof(nameBuf), "%s", obj.Name.c_str());
-            if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf))) {
-                obj.Name = nameBuf;
-            }
-
-            const char* meshItems[] = { "Cube", "Pyramid", "Sphere", "Cylinder", "Plane" };
-            int currentMesh = (int)obj.Type;
-            if (ImGui::Combo("Mesh Type", &currentMesh, meshItems, IM_ARRAYSIZE(meshItems))) {
-                obj.Type = (MeshType)currentMesh;
-            }
-
-            ImGui::Checkbox("Visible", &obj.Visible);
-            ImGui::SameLine();
-            ImGui::Checkbox("Wireframe", &obj.Wireframe);
-
-            ImGui::Separator();
-            ImGui::DragFloat3("Position", obj.Position, 0.1f);
-            ImGui::DragFloat3("Rotation (deg)", obj.Rotation, 1.0f, -360.0f, 360.0f, "%.1f deg");
-            ImGui::DragFloat3("Scale", obj.Scale, 0.05f, 0.01f, 100.0f);
-
-            ImGui::Separator();
-            ImGui::ColorEdit3("Base Color", obj.Color);
-            ImGui::SliderFloat("Metallic", &obj.Metallic, 0.0f, 1.0f);
-            ImGui::SliderFloat("Roughness", &obj.Roughness, 0.0f, 1.0f);
-
-            ImGui::Separator();
-            if (ImGui::Button("Duplicate")) {
-                GameObject copy = obj;
-                copy.Name += " Copy";
-                copy.Position[0] += 1.2f;
-                g_Objects.push_back(copy);
-                g_SelectedObjectIndex = (int)g_Objects.size() - 1;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Focus")) {
-                cameraTarget[0] = g_Objects[g_SelectedObjectIndex].Position[0];
-                cameraTarget[1] = g_Objects[g_SelectedObjectIndex].Position[1];
-                cameraTarget[2] = g_Objects[g_SelectedObjectIndex].Position[2];
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Delete")) {
-                g_Objects.erase(g_Objects.begin() + g_SelectedObjectIndex);
-                g_SelectedObjectIndex = -1;
-            }
-        } else {
-            ImGui::TextDisabled("Select an object in World Outliner.");
-        }
-        ImGui::End();
-
-        // 4. Interactive Content Browser Panel (Fixes Bug #8: functional asset & preset browser instead of dead text)
-        ImGui::Begin("Content Browser");
-        if (ImGui::CollapsingHeader("Models (Click to Spawn)", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (ImGui::Button("Spawn Cube"))     g_Objects.emplace_back("Cube", MeshType::Cube);
-            ImGui::SameLine();
-            if (ImGui::Button("Spawn Sphere"))   g_Objects.emplace_back("Sphere", MeshType::Sphere);
-            ImGui::SameLine();
-            if (ImGui::Button("Spawn Pyramid"))  g_Objects.emplace_back("Pyramid", MeshType::Pyramid);
-            if (ImGui::Button("Spawn Cylinder")) g_Objects.emplace_back("Cylinder", MeshType::Cylinder);
-            ImGui::SameLine();
-            if (ImGui::Button("Spawn Ground Plane")) {
-                g_Objects.emplace_back("Ground Plane", MeshType::Plane);
-                g_Objects.back().Scale[0] = 10.0f;
-                g_Objects.back().Scale[2] = 10.0f;
-                g_Objects.back().Color[0] = 0.35f;
-                g_Objects.back().Color[1] = 0.38f;
-                g_Objects.back().Color[2] = 0.42f;
-            }
-        }
-        if (ImGui::CollapsingHeader("PBR Materials (Apply to Selected)", ImGuiTreeNodeFlags_DefaultOpen)) {
-            bool hasSel = (g_SelectedObjectIndex >= 0 && g_SelectedObjectIndex < (int)g_Objects.size());
-            if (!hasSel) ImGui::BeginDisabled();
-            if (ImGui::Button("Gold")) {
-                auto& o = g_Objects[g_SelectedObjectIndex];
-                o.Color[0] = 1.0f; o.Color[1] = 0.78f; o.Color[2] = 0.22f;
-                o.Metallic = 0.9f; o.Roughness = 0.2f;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Chrome")) {
-                auto& o = g_Objects[g_SelectedObjectIndex];
-                o.Color[0] = 0.85f; o.Color[1] = 0.87f; o.Color[2] = 0.90f;
-                o.Metallic = 1.0f; o.Roughness = 0.1f;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Emerald")) {
-                auto& o = g_Objects[g_SelectedObjectIndex];
-                o.Color[0] = 0.15f; o.Color[1] = 0.80f; o.Color[2] = 0.45f;
-                o.Metallic = 0.2f; o.Roughness = 0.3f;
-            }
-            if (!hasSel) ImGui::EndDisabled();
-        }
-        if (ImGui::CollapsingHeader("Scripts & Templates", ImGuiTreeNodeFlags_DefaultOpen)) {
-            if (ImGui::Button("Load: Solar System")) {
-                snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
-                    "-- Animated Solar System Preset\n"
-                    "clear_scene()\n"
-                    "local sun = add_object('Sun', 'sphere')\n"
-                    "set_scale(sun, 1.6, 1.6, 1.6)\n"
-                    "set_color(sun, 1.0, 0.78, 0.15)\n\n"
-                    "local earth = add_object('Earth', 'sphere')\n"
-                    "set_scale(earth, 0.65, 0.65, 0.65)\n"
-                    "set_color(earth, 0.2, 0.55, 0.95)\n\n"
-                    "local mars = add_object('Mars', 'sphere')\n"
-                    "set_scale(mars, 0.5, 0.5, 0.5)\n"
-                    "set_color(mars, 0.9, 0.35, 0.2)\n\n"
-                    "local t = 0\n"
-                    "function on_update(dt)\n"
-                    "    t = t + dt\n"
-                    "    set_position(earth, math.cos(t * 1.4) * 3.5, 0, math.sin(t * 1.4) * 3.5)\n"
-                    "    set_position(mars, math.cos(t * 0.8) * 5.8, 0, math.sin(t * 0.8) * 5.8)\n"
-                    "end\n");
-                ExecuteLuaScript(g_ScriptBuffer);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Load: Spiral Tower")) {
-                snprintf(g_ScriptBuffer, sizeof(g_ScriptBuffer), "%s",
-                    "-- Procedural Spiral Tower Preset\n"
-                    "clear_scene()\n"
-                    "for i = 0, 29 do\n"
-                    "    local a = i * 0.35\n"
-                    "    local idx = add_object('Step_' .. i, 'cube')\n"
-                    "    set_position(idx, math.cos(a) * 2.5, i * 0.25, math.sin(a) * 2.5)\n"
-                    "    set_rotation(idx, 0, -a * 57.2958, 0)\n"
-                    "    set_scale(idx, 1.2, 0.2, 0.5)\n"
-                    "    set_color(idx, 0.3 + (i / 30) * 0.7, 0.5, 1.0 - (i / 30) * 0.6)\n"
-                    "end\n"
-                    "print('Generated 30 spiral steps!')\n");
-                ExecuteLuaScript(g_ScriptBuffer);
-            }
-        }
-        ImGui::End();
-
-        // 5. Script Editor & Bounded Virtualized Console (Fixes Bug #7 via ImGuiListClipper)
-        ImGui::Begin("Script Editor");
-        ImGui::InputTextMultiline("##source", g_ScriptBuffer, IM_ARRAYSIZE(g_ScriptBuffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 14), ImGuiInputTextFlags_AllowTabInput);
-        if (ImGui::Button("Run Script")) {
-            ExecuteLuaScript(g_ScriptBuffer);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Clear Console")) {
-            ClearConsole();
-        }
-        ImGui::SameLine();
-        ImGui::Checkbox("Auto-scroll", &g_AutoScrollConsole);
-
-        ImGui::Separator();
-        ImGui::Text("Console Output (%d / %d lines):", (int)g_ConsoleLines.size(), (int)MAX_CONSOLE_LINES);
-        ImGui::BeginChild("ConsoleScrollRegion", ImVec2(0, 0), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
-        ImGuiListClipper clipper;
-        clipper.Begin((int)g_ConsoleLines.size());
-        while (clipper.Step()) {
-            for (int line_no = clipper.DisplayStart; line_no < clipper.DisplayEnd; line_no++) {
-                ImGui::TextUnformatted(g_ConsoleLines[line_no].c_str());
-            }
-        }
-        clipper.End();
-        if (g_AutoScrollConsole && g_ConsoleScrollToBottom) {
-            ImGui::SetScrollHereY(1.0f);
-            g_ConsoleScrollToBottom = false;
-        }
-        ImGui::EndChild();
-        ImGui::End();
+        RenderStudio(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget,dt);
 
         // Rendering
         ImGui::Render();
@@ -1286,14 +1084,21 @@ int main(int argc, char* argv[]) {
         }
 
         glViewport(0, 0, fb_width, fb_height);
-        glClearColor(0.10f, 0.11f, 0.14f, 1.0f);
+        glClearColor(0.035f, 0.045f, 0.065f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
 
+        if(g_Studio.SceneActive) {
+        float pixelScaleX=io.DisplayFramebufferScale.x,pixelScaleY=io.DisplayFramebufferScale.y;
+        int sceneWidth=std::max(1,int(g_Studio.SceneSize.x*pixelScaleX)),sceneHeight=std::max(1,int(g_Studio.SceneSize.y*pixelScaleY));
+        g_ViewportTarget.Resize(sceneWidth,sceneHeight);
+        g_ViewportTarget.BindFramebuffer(GL_FRAMEBUFFER,g_ViewportTarget.Framebuffer);
+        glViewport(0,0,sceneWidth,sceneHeight);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        RenderSky();
         // Setup 3D Projection Matrix
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        float aspect = (float)fb_width / (float)fb_height;
+        float aspect = float(sceneWidth) / float(sceneHeight);
         float fov = 45.0f * PI / 180.0f;
         float zNear = 0.1f;
         float zFar = 200.0f;
@@ -1338,7 +1143,8 @@ int main(int argc, char* argv[]) {
                 glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             }
 
-            switch (obj.Type) {
+            if(!obj.Vertices.empty())RenderEditableMesh(obj);
+            else switch (obj.Type) {
                 case MeshType::Cube:     RenderCube(obj.Color);     break;
                 case MeshType::Pyramid:  RenderPyramid(obj.Color);  break;
                 case MeshType::Sphere:   RenderSphere(obj.Color);   break;
@@ -1350,22 +1156,38 @@ int main(int argc, char* argv[]) {
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             }
 
-            if (i == g_SelectedObjectIndex) {
-                RenderSelectionBox();
+            if (obj.Selected || i == g_SelectedObjectIndex) {
+                if(obj.Vertices.empty())RenderSelectionBox();
+                else {
+                    float lo[3]={obj.Vertices[0],obj.Vertices[1],obj.Vertices[2]},hi[3]={lo[0],lo[1],lo[2]};
+                    for(size_t vertex=0;vertex<obj.Vertices.size();vertex+=3)for(int k=0;k<3;++k){lo[k]=std::min(lo[k],obj.Vertices[vertex+k]);hi[k]=std::max(hi[k],obj.Vertices[vertex+k]);}
+                    glPushMatrix();glTranslatef((lo[0]+hi[0])*.5f,(lo[1]+hi[1])*.5f,(lo[2]+hi[2])*.5f);glScalef(hi[0]-lo[0],hi[1]-lo[1],hi[2]-lo[2]);RenderSelectionBox();glPopMatrix();
+                }
                 RenderAxesGizmo(0.8f);
             }
 
             glPopMatrix();
         }
 
+        if(g_Studio.BrushHit){glDisable(GL_DEPTH_TEST);glPointSize(10);glColor3f(1,.75f,.25f);glBegin(GL_POINTS);glVertex3f(g_Studio.BrushWorld.x,g_Studio.BrushWorld.y,g_Studio.BrushWorld.z);glEnd();glPointSize(1);glEnable(GL_DEPTH_TEST);}
+        }
+        g_ViewportTarget.BindFramebuffer(GL_FRAMEBUFFER,0);
+        glViewport(0,0,fb_width,fb_height);
         // Render ImGui overlay
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
+        if(capturePath&&++captureFrame==5&&fb_width<=4096&&fb_height<=4096) {
+            std::vector<unsigned char> pixels(size_t(fb_width)*fb_height*3);
+            glPixelStorei(GL_PACK_ALIGNMENT,1);glReadPixels(0,0,fb_width,fb_height,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+            stbi_flip_vertically_on_write(1);stbi_write_png(capturePath,fb_width,fb_height,3,pixels.data(),fb_width*3);stbi_flip_vertically_on_write(0);
+        }
         SDL_GL_SwapWindow(window);
     }
 
     // Cleanup
     ShutdownLuaState();
+    if(g_LogoTexture)glDeleteTextures(1,&g_LogoTexture);
+    g_ViewportTarget.Destroy();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();

@@ -2,9 +2,9 @@ CXX = x86_64-w64-mingw32-g++
 LUA_DIR ?= build/deps/lua-5.4.6/src
 SDL_DIR ?= build/deps/SDL2-2.30.0/x86_64-w64-mingw32
 BUILD_DIR ?= build/win
-CPPFLAGS = -DSDL_MAIN_HANDLED -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps
+CPPFLAGS = -DSDL_MAIN_HANDLED -DNOMINMAX -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps
 CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP
-LDLIBS = -L$(LUA_DIR) -L$(SDL_DIR)/lib -llua -lSDL2 -lopengl32 -lm
+LDLIBS = -L$(LUA_DIR) -llua $(SDL_DIR)/lib/libSDL2.a -lopengl32 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lsetupapi -lversion -luuid
 LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 
 IMGUI_SRC = imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
@@ -16,15 +16,19 @@ DEPS = $(OBJS:.o=.d) $(ENGINE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 .PHONY: all tests package clean
 all: $(BUILD_DIR)/engine.exe
 
-$(BUILD_DIR)/engine.exe: $(ENGINE_OBJ) $(OBJS)
-	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
+$(BUILD_DIR)/engine.exe: $(ENGINE_OBJ) $(OBJS) $(BUILD_DIR)/app-icon.o
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -mwindows -o $@
 
 $(BUILD_DIR)/engine_tests.exe: $(TEST_OBJ) $(OBJS)
 	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
 
-$(BUILD_DIR)/core_tests.exe: tests/core_tests.cpp scene_core.h
+$(BUILD_DIR)/core_tests.exe: tests/core_tests.cpp scene_core.h scene_tools.h
 	mkdir -p $(BUILD_DIR)
-	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< -static-libgcc -static-libstdc++ -o $@
+	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/app-icon.o: assets/app.rc assets/lunoryx.ico
+	mkdir -p $(BUILD_DIR)
+	x86_64-w64-mingw32-windres -i $< -o $@
 
 $(BUILD_DIR)/obj/%.o: %.cpp
 	mkdir -p $(dir $@)
@@ -33,7 +37,6 @@ $(BUILD_DIR)/obj/%.o: %.cpp
 tests: $(BUILD_DIR)/core_tests.exe $(BUILD_DIR)/engine_tests.exe
 
 package: all tests
-	cp $(SDL_DIR)/bin/SDL2.dll $(BUILD_DIR)/
 	cp README.md $(BUILD_DIR)/
 	cp -r examples docs $(BUILD_DIR)/
 	mkdir -p $(BUILD_DIR)/licenses

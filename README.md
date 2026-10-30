@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="docs/hero.svg" alt="Lunoryx — Script, shape, export" width="100%" />
+  <img src="assets/lunoryx-logo.png" alt="Lunoryx Studio" width="180" />
+  <br/><strong>LUNORYX STUDIO</strong>
 </p>
 
 <p align="center">
@@ -17,11 +18,11 @@
   <a href="#архитектура">Архитектура</a>
 </p>
 
-> **Ранняя тестовая версия · v0.1.0-alpha.1**
+> **Ранняя тестовая версия · v0.2.0-alpha.1**
 > Возможны баги, нестабильная работа и потеря несохранённых изменений.
 > Выпуск предназначен для знакомства и тестирования. Сохраняйте резервные копии важных файлов.
 >
-> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.1.0-alpha.1)** — архив содержит `Lunoryx.exe` и необходимую `SDL2.dll`.
+> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.0-alpha.1)** — самостоятельный `Lunoryx.exe`, без отдельной DLL и консоли.
 
 **Lunoryx** (ранее Lua3D) — небольшой настольный 3D-редактор на C++ с Lua 5.4, OpenGL и Dear ImGui.
 Сцена редактируется через инспектор или скрипт; `on_update(dt)` позволяет анимировать объекты без пересборки приложения.
@@ -47,13 +48,13 @@ make -j2
 ```
 
 Заголовки tinygltf, nlohmann/json и stb уже находятся в `win_deps/`.
-Требуется графическая среда с **OpenGL 2.1 compatibility** и GLSL 1.20.
+Требуется графическая среда с **OpenGL 2.1 compatibility + framebuffer objects (EXT/core)** и GLSL 1.20.
 
 ### Windows · готовая сборка
 
-Скачай **`Lunoryx-v0.1.0-alpha.1-windows-x64.zip`** со страницы
-[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.1.0-alpha.1).
-Распакуй архив целиком и запусти **`Lunoryx.exe`**. `SDL2.dll` должна находиться рядом с приложением.
+Скачай **`Lunoryx-v0.2.0-alpha.1-windows-x64.zip`** со страницы
+[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.0-alpha.1).
+Запусти **`Lunoryx.exe`** напрямую. Дополнительные DLL и файлы для работы не требуются; логотип, справка и лицензии встроены в приложение. ZIP добавляет примеры и текстовые инструкции.
 В архив включены пример Lua, инструкция и лицензии сторонних компонентов.
 
 Актуальные сборки из `main` также доступны как артефакт `lua3d-windows-x64`
@@ -67,13 +68,13 @@ bash tools/prepare_mingw.sh
 make -j2 -f Makefile.win package
 ```
 
-Результат: `build/win/engine.exe`, тесты и `SDL2.dll`.
+Результат: самостоятельный `build/win/engine.exe` и тесты. Приложение линкуется со статической SDL2 и использует Windows GUI subsystem.
 Скрипт загружает Lua 5.4.6 и SDL2 2.30.0, проверяет SHA-256 и собирает Lua для MinGW.
 Для собственных зависимостей можно передать `LUA_DIR=... SDL_DIR=...` в `make`.
 
 ## Первая анимация
 
-Вставь код в **Script Editor** и нажми **Run Script**:
+Вставь код в вкладку **Main.lua** и нажми **Run Script**:
 
 ```lua
 clear_scene()
@@ -90,7 +91,7 @@ end
 ```
 
 Готовый пример: [`examples/orbit.lua`](examples/orbit.lua).
-Пауза и продолжение анимации доступны в верхней панели. **File → Export GLB** сохраняет `export.glb` в рабочий каталог.
+F5 запускает активную вкладку; F11 разворачивает редактор кода. Кнопка + Script создаёт новую вкладку. Закрытая вкладка остаётся доступной в Explorer. Пауза и продолжение анимации доступны в верхней панели. **File → Export GLB** сохраняет `export.glb` в рабочий каталог.
 
 ## Управление
 
@@ -99,17 +100,53 @@ end
 | Вращение камеры | Правая кнопка мыши + перетаскивание |
 | Перемещение камеры | Средняя кнопка мыши + перетаскивание |
 | Приближение | Колесо мыши |
-| Выбор объекта | World Outliner |
-| Трансформации и материал | Details |
-| Дублирование / фокус / удаление | Кнопки в Details |
+| Выбор объекта | Explorer |
+| Трансформации и материал | Properties |
+| Дублирование / фокус / удаление | Кнопки в Properties |
 | Сетка, оси, wireframe | Меню View |
 
 Мышь управляет камерой, когда её не перехватывают панели ImGui.
 
+## Инструменты Studio 0.2
+
+| Инструмент | Как использовать |
+| :--- | :--- |
+| Explorer | Выбор объектов и скриптов; Ctrl+click для нескольких объектов |
+| Build | Примитивы, привязка к сетке и Join Selected Meshes |
+| Sculpt | Выбрать объект, Subdivide, включить Surface Brush и вести ЛКМ по поверхности |
+| Character | Задать пропорции и цвета, Create Character; Play Simulation → WASD / Space |
+| Environment | Day / Sunset / Night, цвета неба, гравитация |
+| Properties | Трансформации, материал, физика и типизированные пользовательские свойства |
+| API Docs | Справка и примеры прямо внутри EXE |
+
+**File → Save Project / Load Project** сохраняет `.lunoryx`: геометрию, свойства,
+скрипты и окружение. Загруженные скрипты нужно запускать явно. Повреждённый проект
+отклоняется до изменения текущей сцены. GLB служит отдельным экспортом для других приложений.
+
+### Новые обращения из Lua
+
+```lua
+local player = add_character('Player', 2, 0.65, 0.45)
+set_physics(player, true, 3, 0) -- dynamic, mass, restitution
+set_property(player, 'Health', 100)
+print(get_property(player, 'Health'))
+set_skybox('sunset')
+
+local clay = add_object('Clay', 'sphere')
+make_editable(clay, 2)
+sculpt(clay, 0, 0.5, 0, 0.8, 0.15, 0)
+-- index, local x/y/z, radius, strength, mode (0 inflate, 1 smooth, 2 flatten)
+local joined = merge_objects({player, clay}, 'Joined')
+```
+
+`set_velocity(index, x, y, z)` и `get_velocity(index)` управляют скоростью.
+`set_character(index, true, speed, jump)` добавляет контроллер и к собственной модели. Числовые входы проверяются до изменения объекта. Примеры, диапазоны и семантика ошибок
+находятся в **Window → API Docs**.
+
 ## Lua API
 
 **Индексы начинаются с нуля.** После удаления последующие индексы сдвигаются.
-Повторно вызывай `find_object(name)`, если структура сцены изменилась. Имена не обязаны быть уникальными;
+Повторно вызывай `find_object(name)`, если структура сцены изменилась. Имена могут содержать до 255 байт и не обязаны быть уникальными;
 поиск возвращает первое совпадение. Пустые имена допустимы.
 
 | Функция | Результат / семантика |
@@ -195,7 +232,11 @@ xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 ./engine
 
 | Путь | Назначение |
 | :--- | :--- |
-| `main.cpp` | SDL/OpenGL, ImGui, Lua API, GLB |
+| `main.cpp` | Главный цикл, SDL/OpenGL, GLB |
+| `scene_tools.h` | Скульптинг, Join, персонажи и физика |
+| `editor_ui.h` / `editor_project.h` | Вкладки, Explorer и файлы проектов |
+| `scene_bindings.h` / `editor_docs.h` | Lua API и встроенная справка |
+| `viewport_target.h` | OpenGL framebuffer сцены |
 | `scene_core.h` | Объекты, примитивы, кватернионы, timeout |
 | `imgui/` | Dear ImGui и платформенные бэкенды |
 | `win_deps/` | tinygltf, json и stb |
@@ -205,14 +246,17 @@ xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 ./engine
 
 ## Границы текущей версии
 
-Lunoryx использует фиксированный OpenGL-пайплайн с простым затенением граней. PBR-факторы сохраняются в GLB;
-viewport не является физически корректным PBR-рендерером. Импорт внешних мешей, текстуры, физика,
-undo/redo и полноценное сохранение проекта пока не реализованы. GLB сохраняет видимую геометрию и материалы,
-но не Lua-код, анимационные callbacks, wireframe и раскладку редактора.
+Это развивающийся редактор, а не замена Blender или Roblox Studio.
+Join соединяет геометрию и цвета; булевы CSG-операции не реализованы, а metallic/roughness
+берутся у первого исходного объекта. Симуляция использует AABB-коллайдеры; персонаж пока
+без скелетного рига и анимационного графа. Окружение процедурное, без импорта HDRI/cubemap.
 
-Автоматические проверки не заменяют испытания на целевых GPU; Windows CI выполняет тесты ядра и API,
-а графический smoke-тест работает на Linux с Mesa. Критерии проверенной сборки описаны выше;
-статус всего движка как универсального production-ready SDK не заявляется.
+Есть отмена последнего мазка, но пока нет общего undo/redo, текстурного и шейдерного редактора.
+Viewport использует простое затенение. GLB сохраняет геометрию и материалы;
+для свойств, скриптов и окружения используйте `.lunoryx`.
+
+Тесты не заменяют испытания на целевых GPU. Графический smoke-тест работает на Linux/Mesa;
+Windows CI запускает тесты и проверяет GUI subsystem и отсутствие внешних SDL/GCC DLL.
 
 <details>
 <summary><b>Зависимости и лицензии</b></summary>
