@@ -27,6 +27,22 @@ static bool SaveStudioProject(const std::string& path) {
     std::string temporary=path+".tmp";
     try {
         if(path.empty()||path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid project path");
+        if(g_Objects.size()>10000)throw std::runtime_error("Project object limit is 10000");
+        size_t totalVertices=0;
+        auto finiteRange=[](float value,float low,float high){return std::isfinite(value)&&value>=low&&value<=high;};
+        for(const auto& o:g_Objects) {
+            if(o.Name.size()>255||o.Name.find('\0')!=std::string::npos)throw std::runtime_error("Invalid object name");
+            for(int k=0;k<3;++k)if(!std::isfinite(o.Position[k])||!std::isfinite(o.Rotation[k])||!std::isfinite(o.Scale[k])||!finiteRange(o.Color[k],0,1)||!finiteRange(o.Velocity[k],-10000,10000))throw std::runtime_error("Invalid transform, color or velocity; stop simulation before saving");
+            if(!finiteRange(o.Metallic,0,1)||!finiteRange(o.Roughness,0,1)||!finiteRange(o.Mass,.01f,10000)||!finiteRange(o.Restitution,0,1)||!finiteRange(o.Friction,0,20)||!finiteRange(o.MoveSpeed,0,100)||!finiteRange(o.JumpSpeed,0,100))throw std::runtime_error("Invalid material or physics property");
+            if(o.Vertices.size()/3>MAX_EDIT_VERTICES||o.Vertices.size()%3||o.Indices.size()>MAX_EDIT_INDICES||o.Indices.size()%3||(o.Vertices.empty()!=o.Indices.empty())||(!o.VertexColors.empty()&&o.VertexColors.size()!=o.Vertices.size()))throw std::runtime_error("Invalid mesh size");
+            totalVertices+=o.Vertices.size()/3;if(totalVertices>1000000)throw std::runtime_error("Project mesh budget exceeded");
+            for(float v:o.Vertices)if(!std::isfinite(v))throw std::runtime_error("Invalid vertex");
+            for(float v:o.VertexColors)if(!finiteRange(v,0,1))throw std::runtime_error("Invalid vertex color");
+            for(uint32_t i:o.Indices)if(i>=o.Vertices.size()/3)throw std::runtime_error("Invalid mesh index");
+            if(o.Properties.size()>256)throw std::runtime_error("Too many custom properties");
+        }
+        for(int k=0;k<3;++k)if(!finiteRange(g_SkyTop[k],0,1)||!finiteRange(g_SkyBottom[k],0,1))throw std::runtime_error("Invalid sky color");
+        if(g_SkyPreset<0||g_SkyPreset>2||!finiteRange(g_Physics.Gravity,-30,0))throw std::runtime_error("Invalid environment settings");
         nlohmann::json root={{"schema",1},{"objects",nlohmann::json::array()},{"scripts",nlohmann::json::array()},
             {"sky_top",SaveVector(g_SkyTop)},{"sky_bottom",SaveVector(g_SkyBottom)},{"sky_preset",g_SkyPreset},{"gravity",g_Physics.Gravity},{"ground",g_Physics.Ground}};
         for(const auto& o:g_Objects) {

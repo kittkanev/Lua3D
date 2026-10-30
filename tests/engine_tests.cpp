@@ -148,6 +148,8 @@ int main() {
     g_Studio.Scripts[1].Allocated=true;g_Studio.Scripts[1].Open=false;std::snprintf(g_Studio.Scripts[1].Name,sizeof(g_Studio.Scripts[1].Name),"Closed.lua");
     auto savedName=g_Objects[0].Name;size_t savedCount=g_Objects.size();
     assert(SaveStudioProject("tests/test-project.lunoryx"));
+    auto validPosition=g_Objects[0].Position[0];g_Objects[0].Position[0]=std::numeric_limits<float>::quiet_NaN();
+    assert(!SaveStudioProject("tests/test-project.lunoryx"));g_Objects[0].Position[0]=validPosition;
     assert(SaveStudioProject("tests/test-project.lunoryx")); // replacing an existing save works on Windows too
     g_Objects[0].Name="changed";
     assert(LoadStudioProject("tests/test-project.lunoryx"));
