@@ -14,6 +14,6 @@ cd lua-5.4.6/src
 mkdir -p mingw-objects
 for source in *.c; do
     case "$source" in lua.c|luac.c) continue ;; esac
-    x86_64-w64-mingw32-gcc -O2 -DLUA_USE_WINDOWS -c "$source" -o "mingw-objects/${source%.c}.o"
+    x86_64-w64-mingw32-gcc -O2 -c "$source" -o "mingw-objects/${source%.c}.o"
 done
 x86_64-w64-mingw32-ar rcs liblua.a mingw-objects/*.o

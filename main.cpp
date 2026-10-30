@@ -26,6 +26,7 @@ extern "C" {
 #include <tiny_gltf.h>
 
 #include "scene_tools.h"
+#include "file_output.h"
 #include "engine_version.h"
 #include <limits>
 #include <exception>
@@ -461,8 +462,9 @@ static int l_get_time(lua_State *L) {
 
 // Lua: export_glb(filename)
 static int l_export_glb(lua_State *L) {
-    const char* filename = luaL_checkstring(L, 1);
-    bool res = ExportGLB(filename);
+    size_t filenameLength=0;
+    const char* filename = luaL_checklstring(L, 1, &filenameLength);
+    bool res = ExportGLB(std::string(filename,filenameLength));
     if (res) {
         AppendConsole(std::string("Successfully exported binary GLB to ") + filename + "\n");
     } else {
@@ -852,7 +854,15 @@ static bool ExportGLB(const std::string& filename) {
     }
     if(model.buffers[0].data.empty())model.buffers.clear();
     model.scenes.push_back(scene);model.defaultScene=0;
-    tinygltf::TinyGLTF writer;return writer.WriteGltfSceneToFile(&model,filename,true,true,true,true);
+    std::unique_ptr<std::FILE,int(*)(std::FILE*)> file(OpenBinaryOutput(filename),std::fclose);
+    if(!file)return false;
+    bool result=false;
+    {
+        BinaryOutputBuffer buffer(file.get());std::ostream output(&buffer);
+        tinygltf::TinyGLTF writer;result=writer.WriteGltfSceneToStream(&model,output,false,true);
+        output.flush();result=result&&output.good();
+    }
+    return std::fclose(file.release())==0&&result;
 }
 
 #include "editor_ui.h"

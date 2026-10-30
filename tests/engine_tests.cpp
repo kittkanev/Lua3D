@@ -49,6 +49,7 @@ int main() {
         assert(duplicate_object(-1) == -1)
         assert(get_object_count() == 2)
         assert(not export_glb('tests/nonexistent-directory/scene.glb'))
+        assert(not export_glb('tests/invalid' .. string.char(0) .. '.glb'))
         for i=1,100 do
             local value = setmetatable({}, {__tostring=function() error('print failed') end})
             local ok, err = pcall(print, value)
@@ -79,6 +80,7 @@ int main() {
     g_Objects.emplace_back("hidden");
     g_Objects.back().Visible = false;
     assert(ExportGLB("tests/test-scene.glb"));
+    assert(ExportGLB("tests/test-scene.glb")); // writable overwrite on every supported CRT
     std::ifstream file("tests/test-scene.glb", std::ios::binary);
     char magic[4] = {}; file.read(magic, 4);
     assert(file && std::memcmp(magic, "glTF", 4) == 0);
