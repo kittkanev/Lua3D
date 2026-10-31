@@ -17,7 +17,3 @@ imgui.ini
 /tests/*.lunoryx
 /tests/*.lunoryx.tmp
 *.validation.json
-
-__pycache__/
-*.pyc
-/core

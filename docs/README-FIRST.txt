@@ -1,24 +1,26 @@
-LUNORYX C STUDIO 0.3.0-alpha.1 — РАННЯЯ ТЕСТОВАЯ ВЕРСИЯ
+LUNORYX STUDIO 0.2.0-alpha.1 — РАННЯЯ ТЕСТОВАЯ ВЕРСИЯ
 
-Запустите Lunoryx.exe. Отдельные DLL и консоль не требуются.
-Нужны Windows x64 и OpenGL 2.1 с GLSL/framebuffer objects.
-Возможны ошибки. Сохраняйте проекты и резервные копии.
+Возможны баги, нестабильная работа и потеря несохранённых изменений.
+Сохраняйте проекты и резервные копии. Это не стабильная production-версия.
 
-W — перемещение, E — поворот, R — масштаб, Q — выделение.
-Тяните цветные оси или поверхность выбранного объекта. F — Focus.
-RMB — orbit, MMB — pan, wheel — zoom; Ctrl+click — мультивыбор.
-Ctrl+Z / Ctrl+Y — undo/redo. Ctrl+S — Save. Путь к проекту — в Toolbox.
-Сетка продолжается вместе с камерой. Шаг и камера настраиваются в Settings.
+ЗАПУСК
+Запустите Lunoryx.exe. Дополнительные файлы и SDL2.dll не требуются.
+Нужны Windows x64 и OpenGL 2.1 с framebuffer objects (EXT или core).
 
-Home / Model / UI / Script / Avatar / Plugins — панели инструментов.
-Assets — выбор файлов, импорт мешей и звуков; можно перетащить файл в окно.
-Список звуковых форматов и ограничения — в README.
-F5 — запуск/продолжение Lua, F9 — breakpoint, F10 — step, F11 — весь экран кода.
-Play запускает симуляцию, Stop возвращает всю сцену редактора.
-Build standalone game — отдельный EXE с проектом и ресурсами внутри.
-Docs — встроенная справка, API и лицензии. Settings сохраняются между запусками.
+НАЧАЛО
+Explorer — объекты и скрипты. Ctrl+click — мультивыбор.
+Tools > Build — примитивы, Grid Snap, Join.
+Tools > Sculpt — подразделение, кисть по поверхности, Shift для обратного Inflate.
+Tools > Character — создайте персонажа, нажмите Play Simulation, затем WASD и Space.
+Tools > Environment — небо, гравитация и сетка.
+Properties — трансформации, физика и пользовательские свойства.
++ Script — новая вкладка. F5 — запуск, F11 — код на весь экран.
+Window > API Docs — встроенная справка по обращениям и примерам.
+File > Save Project / Load Project — проекты .lunoryx, включая скрипты и свойства.
+Export GLB — отдельный экспорт геометрии и материалов, не замена проектному файлу.
 
-MCP: Lunoryx.exe --mcp. Локальный stdio server со своей headless-сценой.
-Пример конфигурации — README.md.
+Скрипты имеют доступ к файлам и процессам и должны быть доверенными.
+Сообщить о баге: https://github.com/kittkanev/Lua3D/issues
 
-https://github.com/kittkanev/Lunoryx/issues
+EARLY TEST RELEASE: bugs and instability are possible. Back up important files.
+Standalone Windows x64 GUI executable; no SDL2.dll or console window required.

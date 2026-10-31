@@ -8,18 +8,15 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install C build and verification dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc make pkg-config libsdl2-dev liblua5.4-dev libgl1-mesa-dev libegl1-mesa-dev ffmpeg
-      - name: Build C editor, geometry, runtime and editor input tests
-        run: make -j2 engine test test-integration test-editor
-      - name: Exercise MCP, codecs and standalone player
-        run: |
-          python tools/test_mcp.py ./engine
-          python tools/test_audio.py
-          python tools/test_player.py
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y g++ make libsdl2-dev liblua5.4-dev libgl1-mesa-dev xvfb xauth
+      - name: Test geometry and scene operations
+        run: make test
+      - name: Build editor and integration tests
+        run: KEEP_TEST_GLB=1 make -j2 engine test-integration
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -27,31 +24,31 @@ jobs:
           cache-dependency-path: tools/package-lock.json
       - name: Validate binary glTF independently
         run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb
-      - name: Render native editor with Mesa
-        run: mkdir -p build && timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 LUNORYX_DISABLE_AUDIO=1 TEST_TIMEOUT=3 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
+      - name: Smoke test editor and timeout
+        run: mkdir -p build && timeout 30s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
       - uses: actions/upload-artifact@v4
         with:
-          name: c-engine-verification
+          name: gltf-validation
           path: |
             tests/test-scene.glb.validation.json
             build/studio-smoke.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
-          make -j2 test test-integration test-editor EXTRA_CFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' EXTRA_LDFLAGS='-fsanitize=address,undefined'
+          make -j2 test-integration EXTRA_CXXFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' EXTRA_LDFLAGS='-fsanitize=address,undefined'
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   mingw:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install C cross compiler
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
-      - name: Prepare SHA-256 verified Lua and SDL2
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+      - name: Prepare verified Lua and SDL2 dependencies
         run: bash tools/prepare_mingw.sh
-      - name: Build standalone editor and Windows tests with C
+      - name: Build editor and Windows tests
         run: make -j2 -f Makefile.win package && python tools/verify_windows.py build/win/engine.exe
       - uses: actions/upload-artifact@v4
         with:
@@ -65,21 +62,16 @@ jobs:
   windows:
     runs-on: windows-2022
     needs: mingw
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: lua3d-windows-x64
-          path: build/ci
-      - name: Run the actual C test executables on Windows
+      - name: Run MinGW binaries on Windows
         shell: pwsh
         run: |
-          & ./build/ci/core_tests.exe
+          New-Item -ItemType Directory -Force tests | Out-Null
+          & ./core_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./build/ci/engine_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./build/ci/editor_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/test_mcp.py ./build/ci/engine.exe
+          & ./engine_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

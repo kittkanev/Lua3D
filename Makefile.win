@@ -1,43 +1,48 @@
-CC = x86_64-w64-mingw32-gcc
+CXX = x86_64-w64-mingw32-g++
 LUA_DIR ?= build/deps/lua-5.4.6/src
 SDL_DIR ?= build/deps/SDL2-2.30.0/x86_64-w64-mingw32
 BUILD_DIR ?= build/win
-CPPFLAGS = -DSDL_MAIN_HANDLED -DNOMINMAX -Inative -Ivendor -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2
-CFLAGS = -std=c11 -Wall -Wextra -Werror -O2 -MMD -MP
-LDLIBS = -L$(LUA_DIR) -llua $(SDL_DIR)/lib/libSDL2.a -lopengl32 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lsetupapi -lversion -luuid -lksuser -lavrt
-LDFLAGS = -static-libgcc
-CORE = native/math.c native/mesh.c native/csg.c native/scene.c native/physics.c native/project.c native/assets.c vendor/cJSON.c
-RUNTIME = native/runtime.c native/mcp.c
-APP = native/main.c native/editor.c native/renderer.c native/settings.c native/audio.c native/player.c
-OBJS = $(addprefix $(BUILD_DIR)/obj/,$(CORE:.c=.o) $(RUNTIME:.c=.o) $(APP:.c=.o))
+CPPFLAGS = -DSDL_MAIN_HANDLED -DNOMINMAX -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps
+CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP
+LDLIBS = -L$(LUA_DIR) -llua $(SDL_DIR)/lib/libSDL2.a -lopengl32 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lsetupapi -lversion -luuid
+LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
+
+IMGUI_SRC = imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
+OBJS = $(addprefix $(BUILD_DIR)/obj/,$(IMGUI_SRC:.cpp=.o))
+ENGINE_OBJ = $(BUILD_DIR)/obj/main.o
+TEST_OBJ = $(BUILD_DIR)/obj/tests/engine_tests.o
+DEPS = $(OBJS:.o=.d) $(ENGINE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
+
+.PHONY: all tests package clean
 all: $(BUILD_DIR)/engine.exe
-$(BUILD_DIR)/engine.exe: $(OBJS) $(BUILD_DIR)/app-icon.o
-	$(CC) $^ $(LDLIBS) $(LDFLAGS) -mwindows -o $@
-$(BUILD_DIR)/obj/%.o: %.c
-	mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-$(BUILD_DIR)/obj/native/main.o: CFLAGS += -Wno-unused-function
-$(BUILD_DIR)/obj/native/audio.o: CFLAGS += -Wno-unused-function
+
+$(BUILD_DIR)/engine.exe: $(ENGINE_OBJ) $(OBJS) $(BUILD_DIR)/app-icon.o
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -mwindows -o $@
+
+$(BUILD_DIR)/engine_tests.exe: $(TEST_OBJ) $(OBJS)
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/core_tests.exe: tests/core_tests.cpp scene_core.h scene_tools.h
+	mkdir -p $(BUILD_DIR)
+	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< $(LDFLAGS) -o $@
+
 $(BUILD_DIR)/app-icon.o: assets/app.rc assets/lunoryx.ico
 	mkdir -p $(BUILD_DIR)
 	x86_64-w64-mingw32-windres -i $< -o $@
-$(BUILD_DIR)/core_tests.exe: tests/core_tests.c $(CORE)
-	mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -lm $(LDFLAGS) -o $@
-$(BUILD_DIR)/engine_tests.exe: tests/engine_tests.c $(CORE) $(RUNTIME)
-	mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ $(LDLIBS) $(LDFLAGS) -o $@
+
+$(BUILD_DIR)/obj/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
 tests: $(BUILD_DIR)/core_tests.exe $(BUILD_DIR)/engine_tests.exe
+
 package: all tests
 	cp README.md $(BUILD_DIR)/
 	cp -r examples docs $(BUILD_DIR)/
 	mkdir -p $(BUILD_DIR)/licenses
 	cp docs/licenses/* $(BUILD_DIR)/licenses/
+
+-include $(DEPS)
+
 clean:
 	rm -rf $(BUILD_DIR)
--include $(OBJS:.o=.d)
-.PHONY: all tests package clean
-$(BUILD_DIR)/editor_tests.exe: tests/editor_tests.c $(CORE) $(RUNTIME) native/editor.c native/settings.c native/player.c
-	mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -Wno-unused-function $^ $(LDLIBS) $(LDFLAGS) -o $@
-tests: $(BUILD_DIR)/editor_tests.exe
