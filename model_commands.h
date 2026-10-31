@@ -68,9 +68,26 @@ static int ModelCommand(std::vector<GameObject> &objects, int index,
       Model::Extrude(m, selected, args.value("distance", .25f));
     else if (action == "weld")
       Model::Weld(m, selected, args.value("distance", .001f));
-    else if (action == "delete")
-      Model::DeleteElements(m, selected, args.value("mode", 2));
-    else if (action == "polygonize")
+    else if (action == "delete") {
+      int mode = args.value("mode", 2);
+      if (mode == 1) {
+        std::set<uint64_t> all;
+        for (const auto &f : m.Faces)
+          for (size_t i = 0; i < f.size(); ++i)
+            all.insert(Model::Edge(f[i], f[(i + 1) % f.size()]));
+        std::vector<uint64_t> ordered(all.begin(), all.end());
+        std::set<uint64_t> chosen;
+        for (auto i : selected) {
+          if (i >= ordered.size())
+            throw std::runtime_error("Invalid edge selection");
+          chosen.insert(ordered[i]);
+        }
+        Model::DeleteEdges(m, chosen);
+      } else if (mode == 0 || mode == 2)
+        Model::DeleteElements(m, selected, mode);
+      else
+        throw std::runtime_error("Invalid element selection mode");
+    } else if (action == "polygonize")
       Model::Polygonize(m);
     else if (action == "normals")
       Model::Triangulate(m);

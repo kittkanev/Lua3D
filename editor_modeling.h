@@ -166,9 +166,19 @@ static void RenderModelTools() {
         int mode = g_Modeling.Mode;
         auto m = Model::Editable(g_Objects[size_t(g_SelectedObjectIndex)]);
         auto vertices = SelectedModelVertices(m);
-        QueueSelectedMesh([selected, vertices, mode](GameObject &o) {
+        std::set<uint64_t> edges;
+        if (mode == 1)
+          for (auto selectedEdge : selected)
+            if (selectedEdge < g_Modeling.Edges.size()) {
+              auto e = g_Modeling.Edges[selectedEdge];
+              edges.insert(Model::Edge(e.first, e.second));
+            }
+        QueueSelectedMesh([selected, vertices, edges, mode](GameObject &o) {
           auto data = Model::Editable(o);
-          Model::DeleteElements(data, mode == 2 ? selected : vertices, mode);
+          if (mode == 1)
+            Model::DeleteEdges(data, edges);
+          else
+            Model::DeleteElements(data, mode == 2 ? selected : vertices, mode);
           Model::SetEditable(o, std::move(data));
         });
       }

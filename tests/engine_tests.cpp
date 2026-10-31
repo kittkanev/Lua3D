@@ -201,6 +201,8 @@ int main() {
     assert(SaveStudioProject("tests/history.lunoryx")&&!ProjectDirty());
     g_Studio.Scripts[0].Allocated=true;std::strcpy(g_Studio.Scripts[0].Code,"-- changed");assert(ProjectDirty());
     assert(!LoadStudioProject("tests/does-not-exist.lunoryx")&&ProjectDirty());
+    StudioMesh seamed;seamed.Positions={0,0,0,1,0,0,2,0,0,0,0,1,1,0,1,2,0,1};seamed.Faces={{0,3,4,1},{1,4,5,2}};seamed.Seams={Model::Edge(1,4)};Model::Triangulate(seamed);Model::Unwrap(seamed);assert(seamed.Positions.size()/3>=8&&!seamed.Seams.empty());auto island=Model::UVIsland(seamed,0);assert(island.size()<seamed.Positions.size()/3);
+    Model::Unwrap(seamed);assert(!seamed.Seams.empty());
     CreateSampleGame();uint64_t editorHash=CompleteDocumentHash();StartSimulation();g_SkyTop[0]=.99f;g_Objects[0].Position[0]=123;g_GameScore=2;StopSimulation();assert(CompleteDocumentHash()==editorHash&&g_GameScore==0);
     ShutdownLuaState();
     std::cout << "PASS: Lua bounds, stack recovery, hostile metamethods, GLB buffer round trip\n";

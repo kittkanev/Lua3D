@@ -1,33 +1,36 @@
-LUNORYX STUDIO 0.2.1-alpha.2 — РАННЯЯ ТЕСТОВАЯ ВЕРСИЯ
+LUNORYX STUDIO 1.0.0-rc.1 — RELEASE CANDIDATE
 
-Возможны баги, нестабильная работа и потеря несохранённых изменений.
-Сохраняйте проекты и резервные копии. Это не стабильная production-версия.
+Запустите Lunoryx.exe. Отдельная SDL/Lua/audio DLL и консоль не нужны.
+Требуются Windows x64, OpenGL 2.1 compatibility и framebuffer objects.
 
-ЗАПУСК
-Запустите Lunoryx.exe. Дополнительные файлы и SDL2.dll не требуются.
-Нужны Windows x64 и OpenGL 2.1 с framebuffer objects (EXT или core).
+БЫСТРЫЙ СТАРТ
+Tools > Character > Game / Build > New third-person example.
+Play Simulation: WASD — движение, Space — прыжок, R — перезапуск.
+Stop Simulation восстанавливает сцену редактора.
+File > Save Project / Save Project As сохраняет редактируемый .lunoryx.
+Build standalone Game.exe упаковывает проект и импортированные ресурсы.
+Готовый Game.exe не требует редактора, компилятора или файлов проекта.
 
-НАЧАЛО
-Explorer — объекты и скрипты. Ctrl+click — мультивыбор.
-Tools > Build — примитивы, Grid Snap, Join.
-Tools > Sculpt — подразделение, кисть по поверхности, Shift для обратного Inflate.
-Tools > Character — создайте персонажа, нажмите Play Simulation, затем WASD и Space.
-Tools > Environment — небо, гравитация и сетка.
-Properties — трансформации, физика и пользовательские свойства.
-+ Script — новая вкладка. F5 — запуск, F11 — код на весь экран.
-Window > API Docs — встроенная справка по обращениям и примерам.
-File > Save Project / Load Project — проекты .lunoryx, включая скрипты и свойства.
-Export GLB — отдельный экспорт геометрии и материалов, не замена проектному файлу.
+МОДЕЛИРОВАНИЕ
+Tools > Build > Mesh Edit / Modifiers: вершины, рёбра, грани, Extrude,
+Merge by Distance, Mirror, Array, Loop Subdivision, Bevel и булевы операции.
+Примените модификаторы перед скульптингом и UV-редактированием.
+UV: швы, Auto unwrap and pack, выбор/перемещение/вращение/масштаб островов.
+Properties > Materials / Texture: слоты, текстуры PNG/JPEG, назначение граням.
 
-Скрипты имеют доступ к файлам и процессам и должны быть доверенными.
-Сообщить о баге: https://github.com/kittkanev/Lua3D/issues
+Сцена: Q/W/E/R; Ctrl+click — мультивыбор; ПКМ — орбита; СКМ — панорама.
+F5 — запуск скрипта; F11 — полный экран кода.
+Edit > Undo/Redo — операции сцены. Текст скрипта имеет собственную отмену.
+Window > API Docs — справка и лицензии, встроенные в приложение.
 
-EARLY TEST RELEASE: bugs and instability are possible. Back up important files.
-Standalone Windows x64 GUI executable; no SDL2.dll or console window required.
+Старые проекты schema 1 читаются; новые сохраняются как schema 2.
+Загрузка проекта в редактор не запускает скрипты автоматически.
+Lua-скрипты доверенные и имеют доступ к файлам и процессам.
 
-ДОПОЛНЕНИЯ 0.2.1
-Восстановлена основа и интерфейс v0.2. Переработка v0.3 отменена.
-Scene: Q/W/E/R — Select/Move/Rotate/Scale. Тяните манипуляторы мышью.
-Edit: Undo/Redo объектов. Settings: камера, большая сетка, snapping, звук.
-Audio: импорт WAV/MP3/FLAC/OGG/W64/RF64 по пути или перетаскиванием файла.
-MCP: Lunoryx.exe --mcp. Конфигурация и точный список функций — в README.
+ГРАНИЦЫ
+Физика AABB; статический GLB; простой освещённый viewport.
+Нет скелетной анимации, нодовых систем, офлайн-рендера и полной совместимости
+с Blender. Подробнее: README.md и описание релиза.
+
+Каждый релиз содержит SHA256SUMS.txt, визуальный отчёт и снимки из тестов.
+Сообщить об ошибке: https://github.com/kittkanev/Lunoryx/issues
