@@ -126,7 +126,6 @@ static bool LoadStudioProject(const std::string& path) {
             for(const auto& index:j.at("indices"))if(!index.is_number_integer()||index.get<double>()<0||index.get<double>()>4294967295.0)throw std::runtime_error("Invalid mesh index type");
             o.Vertices=j.at("vertices").get<std::vector<float>>();o.Indices=j.at("indices").get<std::vector<uint32_t>>();o.VertexColors=j.at("vertex_colors").get<std::vector<float>>();
             if(o.Vertices.size()%3||o.Indices.size()%3||(!o.Vertices.empty()&&o.Indices.empty())||(o.Vertices.empty()&&!o.Indices.empty())||(!o.VertexColors.empty()&&o.VertexColors.size()!=o.Vertices.size()))throw std::runtime_error("Malformed mesh");
-            totalVertices+=o.Vertices.size()/3;if(totalVertices>1000000)throw std::runtime_error("Project mesh budget exceeded");
             for(float v:o.Vertices)if(!std::isfinite(v))throw std::runtime_error("Invalid vertex");
             for(float v:o.VertexColors)if(!std::isfinite(v)||v<0||v>1)throw std::runtime_error("Invalid vertex color");
             for(uint32_t i:o.Indices)if(i>=o.Vertices.size()/3)throw std::runtime_error("Mesh index outside vertex range");
@@ -137,6 +136,7 @@ static bool LoadStudioProject(const std::string& path) {
                 if(!SetProperty(o,it.key(),v))throw std::runtime_error("Invalid property value");
             }
             if(root.at("schema").get<int>()==2)ReadModelFields(j,o,path);
+            totalVertices+=o.Vertices.size()/3;if(totalVertices>1000000)throw std::runtime_error("Project mesh budget exceeded");
             for(const auto& previous:objects)if(previous.Id==o.Id)throw std::runtime_error("Duplicate stable object ID");
             objects.push_back(std::move(o));
         }

@@ -1,4 +1,4 @@
-LUNORYX STUDIO 1.0.0-rc.1 — RELEASE CANDIDATE
+LUNORYX STUDIO 1.0.0 — FIRST STABLE RELEASE
 
 Запустите Lunoryx.exe. Отдельная SDL/Lua/audio DLL и консоль не нужны.
 Требуются Windows x64, OpenGL 2.1 compatibility и framebuffer objects.
