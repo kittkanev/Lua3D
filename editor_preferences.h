@@ -3,8 +3,9 @@
 struct EditorPreferences {
   float OrbitSensitivity = .4f, PanSensitivity = .02f, ZoomSensitivity = .8f,
         Fov = 45, FarClip = 50000, GridStep = 1, RotationSnap = 15,
-        ScaleSnap = .1f, MasterVolume = .8f;
-  bool AdaptiveGrid = true, ShowSettings = false, VSync = true;
+        ScaleSnap = .1f, MasterVolume = .8f, MoveSnap = .5f;
+  bool AdaptiveGrid = true, ShowSettings = false, VSync = true,
+       SnapEnabled = false, LocalTransform = false;
   int Theme = 0;
 };
 static EditorPreferences g_Preferences;
@@ -25,7 +26,10 @@ static bool SaveEditorPreferences() {
                       {"theme", g_Preferences.Theme},
                       {"rotation_snap", g_Preferences.RotationSnap},
                       {"scale_snap", g_Preferences.ScaleSnap},
-                      {"master_volume", g_Preferences.MasterVolume}};
+                      {"master_volume", g_Preferences.MasterVolume},
+                      {"move_snap", g_Preferences.MoveSnap},
+                      {"snap_enabled", g_Preferences.SnapEnabled},
+                      {"local_transform", g_Preferences.LocalTransform}};
   std::string temporary = g_PreferencesPath + ".tmp";
   std::ofstream f(temporary, std::ios::binary | std::ios::trunc);
   std::string text = j.dump(2);
@@ -70,6 +74,9 @@ static void LoadEditorPreferences() {
     p.RotationSnap = number("rotation_snap", p.RotationSnap, .1f, 180);
     p.ScaleSnap = number("scale_snap", p.ScaleSnap, .001f, 10);
     p.MasterVolume = number("master_volume", p.MasterVolume, 0, 1);
+    p.MoveSnap = number("move_snap", p.MoveSnap, .01f, 1000);
+    p.SnapEnabled = j.value("snap_enabled", false);
+    p.LocalTransform = j.value("local_transform", false);
     p.AdaptiveGrid = j.value("adaptive_grid", true);
     p.VSync = j.value("vsync", true);
     p.Theme = j.value("theme", 0);

@@ -172,7 +172,7 @@ int main() {
     {std::ofstream broken("tests/broken-project.lunoryx");broken<<corrupt;}
     assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects.size()==savedCount);
     std::remove("tests/test-project.lunoryx");std::remove("tests/broken-project.lunoryx");
-    g_PreferencesPath="tests/test-settings.json";g_Preferences.Fov=73;g_Preferences.OrbitSensitivity=.7f;assert(SaveEditorPreferences());g_Preferences.Fov=45;LoadEditorPreferences();assert(g_Preferences.Fov==73&&std::abs(g_Preferences.OrbitSensitivity-.7f)<1e-6f);
+    g_PreferencesPath="tests/test-settings.json";g_Preferences.Fov=73;g_Preferences.OrbitSensitivity=.7f;g_Preferences.MoveSnap=2;g_Preferences.SnapEnabled=true;assert(SaveEditorPreferences());g_Preferences.Fov=45;LoadEditorPreferences();assert(g_Preferences.Fov==73&&std::abs(g_Preferences.OrbitSensitivity-.7f)<1e-6f&&g_Preferences.MoveSnap==2&&g_Preferences.SnapEnabled);
     {std::ofstream invalid("tests/test-settings.json");invalid<<"{\"fov\":0}";}LoadEditorPreferences();assert(g_Preferences.Fov==73);std::remove("tests/test-settings.json");g_PreferencesPath.clear();g_Preferences=EditorPreferences();
     ShutdownLuaState();
     for (int run = 0; run < 50; ++run) {

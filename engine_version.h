@@ -1,4 +1,4 @@
 #pragma once
 #define LUNORYX_NAME "Lunoryx"
-#define LUNORYX_VERSION "0.2.1-alpha.1"
+#define LUNORYX_VERSION "0.2.1-alpha.2"
 #define LUNORYX_WINDOW_TITLE LUNORYX_NAME " Studio " LUNORYX_VERSION " | EARLY TEST BUILD - BUGS POSSIBLE"

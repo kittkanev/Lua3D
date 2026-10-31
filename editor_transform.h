@@ -223,6 +223,7 @@ struct StudioObjectHistory {
     return true;
   }
   bool Redo(std::vector<GameObject> &objects) {
+    Capture(objects);
     if (States.empty() || Cursor + 1 >= States.size())
       return false;
     objects = States[++Cursor];

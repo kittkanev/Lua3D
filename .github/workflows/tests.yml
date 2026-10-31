@@ -84,3 +84,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/test_studio_mcp.py ./engine.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import wave,math,struct; f=wave.open('tests/tone.wav','wb'); f.setparams((1,2,22050,0,'NONE','not compressed')); f.writeframes(b''.join(struct.pack('<h',int(math.sin(i*.1)*12000)) for i in range(11025))); f.close()"
+          $env:LUNORYX_AUDIO_NULL='1'
+          & ./studio_audio_tests.exe tests/tone.wav
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

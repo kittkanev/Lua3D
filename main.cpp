@@ -817,7 +817,7 @@ static void RenderAxesGizmo(float length = 1.2f) {
 static void RenderGrid(float distance,const float target[3]) {
     StudioGridPlan plan=StudioPlanGrid(distance,target[0],target[2],g_Preferences.GridStep,g_Preferences.AdaptiveGrid);
     glBegin(GL_LINES);
-    for(int level=0;level<6;++level){float step=plan.Step*std::pow(10.0f,float(level)),extent=step*plan.Lines;
+    for(int level=0;level<12;++level){float step=plan.Step*std::pow(10.0f,float(level)),extent=step*plan.Lines;
         float cx=std::floor(target[0]/step)*step,cz=std::floor(target[2]/step)*step;
         for(int i=-plan.Lines;i<=plan.Lines;++i){float x=cx+i*step,z=cz+i*step;float shade=i%10==0?.34f:.23f;glColor3f(shade,shade,shade+.025f);
             glVertex3f(x,0,cz-extent);glVertex3f(x,0,cz+extent);glVertex3f(cx-extent,0,z);glVertex3f(cx+extent,0,z);}
@@ -953,6 +953,7 @@ int main(int argc, char* argv[]) {
     }
     char* preferenceDirectory=SDL_GetPrefPath("Lunoryx","Studio-v02");if(preferenceDirectory){g_PreferencesPath=std::string(preferenceDirectory)+"settings.json";SDL_free(preferenceDirectory);}LoadEditorPreferences();SDL_GL_SetSwapInterval(g_Preferences.VSync?1:0);if(g_Preferences.Theme==1)ImGui::StyleColorsLight();
     InitializeStudio();
+    g_Studio.Snap=g_Preferences.MoveSnap;g_Studio.TransformSnap=g_Preferences.SnapEnabled;g_Studio.LocalTransform=g_Preferences.LocalTransform;
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
     g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);
@@ -1223,7 +1224,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
-    SaveEditorPreferences();
+    PersistStudioPreferences();
     ShutdownLuaState();
     studio_audio_shutdown();
     if(g_LogoTexture)glDeleteTextures(1,&g_LogoTexture);

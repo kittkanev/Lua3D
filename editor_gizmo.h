@@ -47,6 +47,12 @@ static void RenderTransformGizmo(float distance, float pitch, float yaw,
     g_Studio.TransformDragging = false;
   }
 }
+static void PersistStudioPreferences() {
+  g_Preferences.MoveSnap = g_Studio.Snap;
+  g_Preferences.SnapEnabled = g_Studio.TransformSnap;
+  g_Preferences.LocalTransform = g_Studio.LocalTransform;
+  SaveEditorPreferences();
+}
 static void RenderEditorSettings() {
   if (!g_Preferences.ShowSettings)
     return;
@@ -73,7 +79,7 @@ static void RenderEditorSettings() {
     ImGui::DragFloat("Rotation snap", &g_Preferences.RotationSnap, 1, .1f, 180);
     ImGui::DragFloat("Scale snap", &g_Preferences.ScaleSnap, .01f, .001f, 10);
     ImGui::SeparatorText("Editor");
-    const char *themes[] = {"Original dark", "Light"};
+    const char *themes[] = {"Dark", "Light"};
     if (ImGui::Combo("Theme", &g_Preferences.Theme, themes, 2)) {
       if (g_Preferences.Theme == 0)
         ImGui::StyleColorsDark();
@@ -83,6 +89,9 @@ static void RenderEditorSettings() {
     if (ImGui::Checkbox("VSync", &g_Preferences.VSync))
       SDL_GL_SetSwapInterval(g_Preferences.VSync ? 1 : 0);
     ImGui::SliderFloat("Master volume", &g_Preferences.MasterVolume, 0, 1);
+    g_Preferences.MoveSnap = g_Studio.Snap;
+    g_Preferences.SnapEnabled = g_Studio.TransformSnap;
+    g_Preferences.LocalTransform = g_Studio.LocalTransform;
     if (ImGui::Button("Save settings"))
       AppendConsole(SaveEditorPreferences() ? "Settings saved.\n"
                                             : "Settings could not be saved.\n");
@@ -90,6 +99,11 @@ static void RenderEditorSettings() {
     if (ImGui::Button("Reset settings")) {
       g_Preferences = EditorPreferences();
       g_Preferences.ShowSettings = true;
+      g_Studio.Snap = .5f;
+      g_Studio.TransformSnap = false;
+      g_Studio.LocalTransform = false;
+      g_ShowGrid = g_ShowAxes = true;
+      SDL_GL_SetSwapInterval(1);
       ImGui::StyleColorsDark();
     }
   }
