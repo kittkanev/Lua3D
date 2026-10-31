@@ -1,6 +1,7 @@
 #pragma once
 #include "embedded_licenses.h"
 #include "extension_licenses.h"
+#include "modeling_licenses.h"
 struct ApiTopic {const char* Title;const char* Text;};
 static const ApiTopic kApiTopics[]={
 {"Getting started",R"DOC(LUNORYX STUDIO
@@ -128,6 +129,7 @@ Use stable object IDs returned by MCP; legacy Lua continues to use array indices
 Save via project_save, then open the project in Studio. Loaded scripts do not run.
 run_lua executes TRUSTED Lua with standard libraries, as in the original editor.
 )DOC"}
+,{"Modeling licenses",kModelingLicenses}
 ,{"Additional licenses",kExtensionLicenses}
 ,{"Third-party licenses",kEmbeddedLicenses}
 };

@@ -9,6 +9,7 @@ struct StudioMcpTool {
   const char *Schema;
 };
 static const StudioMcpTool kStudioMcpTools[] = {
+    {"mesh_operation","Edit a mesh by stable object ID. Actions: modifier, apply, boolean, polygonize, extrude, weld, delete, normals. JSON options use the same modeling commands as Lua.",R"({"type":"object","properties":{"id":{"type":"integer"},"action":{"type":"string"},"options":{"type":"object"}},"required":["id","action"]})"},
     {"scene_list", "Read the v0.2 scene with stable IDs and legacy Lua indices",
      R"({"type":"object","properties":{}})"},
     {"add_object", "Add an object using the original engine",
@@ -55,6 +56,10 @@ static nlohmann::json StudioMcpScene() {
 static nlohmann::json StudioMcpCall(const std::string &tool,
                                     const nlohmann::json &args) {
   try {
+    if(tool=="mesh_operation"){
+      uint64_t id=args.at("id").get<uint64_t>();int index=-1;for(size_t i=0;i<g_Objects.size();++i)if(g_Objects[i].Id==id)index=int(i);
+      int result=ModelCommand(g_Objects,index,args.at("action").get<std::string>(),args.value("options",nlohmann::json::object()));g_ObjectHistory.Capture(g_Objects);return StudioMcpText(nlohmann::json({{"index",result},{"id",g_Objects[size_t(result)].Id}}).dump());
+    }
     if (tool == "scene_list")
       return StudioMcpText(StudioMcpScene().dump());
     if (tool == "undo_objects")

@@ -14,7 +14,7 @@ inline uint64_t StudioDocumentHash() {
 }
 struct StudioHistory {
     std::vector<StudioSnapshot> States;size_t Cursor=0,Bytes=0;
-    static size_t Size(const StudioSnapshot& s){size_t n=StudioObjectHistory::Size(s.Objects)+s.Sounds.size()*sizeof(StudioSound);for(const auto& o:s.Objects){n+=o.Name.size();for(const auto& p:o.Properties)n+=p.first.size()+sizeof(ObjectProperty)+p.second.TextValue.size();}for(const auto& a:s.Sounds)n+=a.Name.size()+a.Path.size();return n;}
+    static size_t Size(const StudioSnapshot& s){size_t n=StudioObjectHistory::Size(s.Objects)+s.Sounds.size()*sizeof(StudioSound);for(const auto& o:s.Objects){n+=o.Name.size()+o.UV.size()*4+o.Normals.size()*4+o.BaseMesh.Positions.size()*4+o.BaseMesh.Indices.size()*4+o.BaseMesh.UV.size()*4;for(const auto& f:o.Faces)n+=f.size()*4;for(const auto& f:o.BaseMesh.Faces)n+=f.size()*4;for(const auto& p:o.Properties)n+=p.first.size()+sizeof(ObjectProperty)+p.second.TextValue.size();}for(const auto& a:s.Sounds)n+=a.Name.size()+a.Path.size();return n;}
     void Capture(const std::vector<GameObject>&) {
         if(g_PhysicsRunning)return;
         uint64_t hash=StudioDocumentHash();if(!States.empty()&&States[Cursor].Hash==hash)return;

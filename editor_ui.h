@@ -107,11 +107,12 @@ static Vec3 CameraVector(Vec3 v,float pitch,float yaw) {
     a=yaw*toRad;c=std::cos(a);s=std::sin(a);float x=c*v.x+s*v.z;
     v.z=-s*v.x+c*v.z;v.x=x;return v;
 }
+#include "editor_modeling.h"
 #include "editor_gizmo.h"
 
 static void SceneInteraction(float distance,float pitch,float yaw,const float target[3],float dt) {
     auto& io=ImGui::GetIO();
-    if(!g_Studio.SceneHovered)return;
+    if(!g_Studio.SceneHovered||g_Modeling.Edit)return;
     Vec3 camera=CameraVector({0,0,distance},pitch,yaw);
     camera.x+=target[0];camera.y+=target[1];camera.z+=target[2];
     float nx=(io.MousePos.x-g_Studio.SceneMin.x)/g_Studio.SceneSize.x*2-1;
@@ -121,7 +122,8 @@ static void SceneInteraction(float distance,float pitch,float yaw,const float ta
     float length=float(std::sqrt(Dot(ray,ray)));ray.x/=length;ray.y/=length;ray.z/=length;
     if(g_Studio.SculptEnabled&&g_SelectedObjectIndex>=0&&size_t(g_SelectedObjectIndex)<g_Objects.size()&&!g_PhysicsRunning) {
         auto& object=g_Objects[size_t(g_SelectedObjectIndex)];
-        if(object.Vertices.empty()&&!MakeEditable(object))return;
+        if(object.Vertices.empty()){if(!ImGui::IsMouseDown(0)||!MakeEditable(object))return;}
+        if(!object.Modifiers.empty())return;
         Vec3 hit;float nearest=10000;
         if(RaycastObject(object,camera,ray,hit,nearest)) {
             g_Studio.BrushHit=TransformPoint(object,hit,g_Studio.BrushWorld);
@@ -169,7 +171,8 @@ static void RenderWorkspace(float distance,float pitch,float yaw,const float tar
                 g_Studio.SceneActive=true;
                 ImGui::Image(ImTextureID(g_ViewportTarget.Color),g_Studio.SceneSize,ImVec2(0,1),ImVec2(1,0));
                 g_Studio.SceneHovered=ImGui::IsItemHovered();
-                RenderTransformGizmo(distance,pitch,yaw,target);
+                if(!g_Modeling.Edit)RenderTransformGizmo(distance,pitch,yaw,target);
+                DrawModelSelection(distance,pitch,yaw,target);
                 SceneInteraction(distance,pitch,yaw,target,dt);
                 ImGui::EndTabItem();
             }
@@ -302,6 +305,7 @@ static void RenderTools(float& distance,float& pitch,float& yaw,float target[3])
                     std::vector<int> selection;for(size_t i=0;i<g_Objects.size();++i)if(g_Objects[i].Selected)selection.push_back(int(i));
                     int merged=MergeObjects(g_Objects,selection,"Joined Mesh");if(merged>=0)SelectObject(merged);else AppendConsole("Join needs at least two valid objects within the mesh limit.\n");
                 }
+                RenderModelTools();
                 ImGui::TextWrapped("Join bakes transforms and colors into one mesh. It is not a boolean union.");
                 ImGui::Separator();EditScalar("Distance",distance,1.5f,80);EditScalar("Pitch",pitch,-89,89);EditScalar("Yaw",yaw,-180,180);yaw=WrapYaw(yaw);
                 EditVector3("Camera Target",target,.1f);

@@ -8,11 +8,11 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y g++ make libsdl2-dev liblua5.4-dev libgl1-mesa-dev libegl1-mesa-dev xvfb xauth ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y g++ make cmake libsdl2-dev liblua5.4-dev libgl1-mesa-dev libegl1-mesa-dev xvfb xauth ffmpeg
       - name: Test geometry and scene operations
         run: make test
       - name: Build editor and integration tests
@@ -31,6 +31,7 @@ jobs:
           mkdir -p build
           timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
           timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=8 LUNORYX_GIZMO_SMOKE=1 LUNORYX_CAPTURE_PATH=build/gizmo-smoke.png ./engine
+          timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 LUNORYX_CAPTURE_PATH=build/modeling.png ./engine --report-modeling
       - uses: actions/upload-artifact@v4
         with:
           name: gltf-validation
@@ -38,6 +39,7 @@ jobs:
             tests/test-scene.glb.validation.json
             build/studio-smoke.png
             build/gizmo-smoke.png
+            build/modeling.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
@@ -47,11 +49,11 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   mingw:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install cross compiler
-        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+        run: sudo apt-get update && sudo apt-get install -y cmake g++-mingw-w64-x86-64
       - name: Prepare verified Lua and SDL2 dependencies
         run: bash tools/prepare_mingw.sh
       - name: Build editor and Windows tests
@@ -78,6 +80,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force tests | Out-Null
+          & ./modeling_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./core_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./engine_tests.exe
