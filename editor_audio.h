@@ -3,7 +3,7 @@ static bool ImportStudioSound(const std::string &path) {
   if (path.empty() || path.size() > 511 || g_Sounds.size() >= 64)
     return false;
   StudioSound sound;
-  sound.Path = path;
+  sound.Path = AbsoluteAssetPath(path);
   size_t slash = path.find_last_of("/\\");
   sound.Name = path.substr(slash == std::string::npos ? 0 : slash + 1);
   if (sound.Name.size() > 255)
@@ -28,19 +28,7 @@ static void RenderStudioAudio() {
                              "WAV / MP3 / FLAC / OGG / W64 / RF64", path,
                              sizeof(path));
     if (ImGui::Button("Import sound")) {
-      if (g_Sounds.size() < 64 && path[0]) {
-        StudioSound sound;
-        sound.Path = path;
-        size_t slash = sound.Path.find_last_of("/\\");
-        sound.Name =
-            sound.Path.substr(slash == std::string::npos ? 0 : slash + 1);
-        char error[256];
-        if (studio_audio_load(sound.Id, path, error)) {
-          g_Sounds.push_back(sound);
-          g_SelectedSound = int(g_Sounds.size()) - 1;
-        } else
-          AppendConsole(std::string(error) + "\n");
-      }
+      ImportStudioSound(path);
     }
     ImGui::Separator();
     for (size_t i = 0; i < g_Sounds.size(); ++i) {
@@ -57,6 +45,9 @@ static void RenderStudioAudio() {
       if (ImGui::InputText("Name", name, sizeof(name)))
         sound.Name = name;
       ImGui::TextWrapped("%s", sound.Path.c_str());
+      if(!AssetExists(sound.Path))ImGui::TextColored(ImVec4(1,.5f,.3f,1),"Missing resource: select a replacement below");
+      if(ImGui::Button("Replace with path above")&&path[0]&&AssetExists(path)){studio_audio_unload(sound.Id);sound.Path=AbsoluteAssetPath(path);}
+
       ImGui::SliderFloat("Volume", &sound.Volume, 0, 2);
       ImGui::SliderFloat("Pitch / speed", &sound.Pitch, .1f, 4);
       ImGui::Checkbox("Loop", &sound.Loop);
@@ -90,7 +81,7 @@ static int l_add_sound(lua_State *L) {
       g_Sounds.size() >= 64)
     return luaL_error(L, "Invalid sound path, name or sound limit");
   StudioSound sound;
-  sound.Path = path;
+  sound.Path = AbsoluteAssetPath(path);
   sound.Name = name;
   g_Sounds.push_back(sound);
   lua_pushinteger(L, lua_Integer(g_Sounds.size() - 1));

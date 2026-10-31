@@ -181,5 +181,17 @@ int main() {
         assert(lua_gettop(g_LuaState) == 0);
         ShutdownLuaState();
     }
+    // Completed operations cover audio and environment, and Play restores both.
+    g_PhysicsRunning=false;g_ObjectHistory.Clear();g_Sounds.clear();g_ObjectHistory.Capture(g_Objects);
+    float originalSky=g_SkyTop[0];g_SkyTop[0]=.37f;StudioSound tone;tone.Path="missing.wav";g_Sounds.push_back(tone);g_ObjectHistory.Capture(g_Objects);
+    assert(g_ObjectHistory.Undo(g_Objects)&&g_Sounds.empty()&&g_SkyTop[0]==originalSky);
+    assert(g_ObjectHistory.Redo(g_Objects)&&g_Sounds.size()==1&&g_SkyTop[0]==.37f);
+    StartSimulation();g_SkyTop[0]=.91f;g_Physics.Gravity=-1;g_Sounds.clear();StopSimulation();
+    assert(g_SkyTop[0]==.37f&&g_Sounds.size()==1&&g_Physics.Gravity!=-1);
+    assert(RelativeAssetPath("/tmp/game/assets/tone.wav","/tmp/game/scene.lunoryx")=="assets/tone.wav");
+    assert(RelativeAssetPath("/tmp/shared/tone.wav","/tmp/game/scene.lunoryx")=="../shared/tone.wav");
+    assert(SaveStudioProject("tests/history.lunoryx")&&!ProjectDirty());
+    g_Studio.Scripts[0].Allocated=true;std::strcpy(g_Studio.Scripts[0].Code,"-- changed");assert(ProjectDirty());
+    assert(!LoadStudioProject("tests/does-not-exist.lunoryx")&&ProjectDirty());
     std::cout << "PASS: Lua bounds, stack recovery, hostile metamethods, GLB buffer round trip\n";
 }

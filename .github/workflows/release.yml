@@ -1,4 +1,4 @@
-name: Publish Lunoryx Studio prerelease
+name: Publish verified Lunoryx release
 on:
   workflow_run:
     workflows: [Build and tests]
@@ -20,12 +20,15 @@ jobs:
       GH_REPO: ${{ github.repository }}
       SOURCE_RUN: ${{ github.event.workflow_run.id }}
       RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
-      RELEASE_TAG: v0.2.1-alpha.2
-      RELEASE_TITLE: Lunoryx Studio v0.2.1-alpha.2 — Early Test Release
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Read version from tested source
+        run: |
+          version=$(python -c 'import re; print(re.search(r"LUNORYX_VERSION \"([^\"]+)\"", open("engine_version.h").read())[1])')
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Lunoryx Studio v$version" >> "$GITHUB_ENV"
       - name: Check publication state
         id: state
         run: |
@@ -42,22 +45,25 @@ jobs:
         if: steps.state.outputs.published != 'true'
         run: |
           python tools/package_release.py --artifact-dir build/artifact --output-dir build/release
-          test -s build/release/Lunoryx-v0.2.1-alpha.2-windows-x64.zip
+          test -s "build/release/Lunoryx-${RELEASE_TAG}-windows-x64.zip"
           test -s build/release/Lunoryx.exe
           test -s build/release/SHA256SUMS.txt
+      - name: Download visual evidence from the tested run
+        if: steps.state.outputs.published != 'true'
+        run: |
+          gh run download "$SOURCE_RUN" --name gltf-validation --dir build/visual
+          cp "docs/release-notes-${RELEASE_TAG}.md" build/release/REPORT.md
+          find build/visual -name '*.png' -exec cp {} build/release/ \;
       - name: Create draft and upload verified files
         if: steps.state.outputs.published != 'true'
         run: |
           if [ '${{ steps.state.outputs.draft }}' != true ]; then
-            gh release create "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TITLE" --notes-file docs/release-notes-v0.2.1-alpha.2.md --prerelease --draft
+            gh release create "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TITLE" --notes-file "docs/release-notes-${RELEASE_TAG}.md" --prerelease --draft
           fi
-          gh release upload "$RELEASE_TAG" build/release/Lunoryx-v0.2.1-alpha.2-windows-x64.zip build/release/Lunoryx.exe build/release/SHA256SUMS.txt --clobber
-          gh release edit "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TITLE" --notes-file docs/release-notes-v0.2.1-alpha.2.md --draft=false --prerelease --latest=false
-      - name: Withdraw the rejected v0.3 rewrite
-        run: |
-          if gh release view v0.3.0-alpha.1 >/dev/null 2>&1; then
-            gh release edit v0.3.0-alpha.1 --draft=true --latest=false
-          fi
-      - name: Verify published prerelease
+          gh release upload "$RELEASE_TAG" build/release/*.zip build/release/*.exe build/release/*.txt build/release/*.md build/release/*.png --clobber
+          prerelease=true; latest=false
+          if [[ "$RELEASE_TAG" != *-* ]]; then prerelease=false; latest=true; fi
+          gh release edit "$RELEASE_TAG" --target "$RELEASE_SHA" --title "$RELEASE_TITLE" --notes-file "docs/release-notes-${RELEASE_TAG}.md" --draft=false --prerelease="$prerelease" --latest="$latest"
+      - name: Verify published release
         run: |
           gh release view "$RELEASE_TAG" --json url,isDraft,isPrerelease,targetCommitish,assets

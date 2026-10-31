@@ -8,6 +8,11 @@
 #include <windows.h>
 #endif
 static char g_ProjectPath[512]="project.lunoryx";
+static std::string g_OpenedProject;
+static uint64_t g_SavedDocumentHash=0;
+static uint64_t CompleteDocumentHash();
+static bool ProjectDirty(){return CompleteDocumentHash()!=g_SavedDocumentHash;}
+
 
 static nlohmann::json SaveVector(const float v[3]) { return {v[0],v[1],v[2]}; }
 static void ReadVector(const nlohmann::json& j,float v[3],bool color=false) {
@@ -61,18 +66,14 @@ static bool SaveStudioProject(const std::string& path) {
         for(const auto& sound:g_Sounds){
             if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos||!finiteRange(sound.Volume,0,2)||!finiteRange(sound.Pitch,.1f,4))throw std::runtime_error("Invalid sound settings");
             for(float p:sound.Position)if(!std::isfinite(p))throw std::runtime_error("Invalid sound position");
-            root["sounds"].push_back({{"name",sound.Name},{"path",sound.Path},{"position",SaveVector(sound.Position)},{"volume",sound.Volume},{"pitch",sound.Pitch},{"loop",sound.Loop},{"spatial",sound.Spatial},{"autoplay",sound.Autoplay}});
+            root["sounds"].push_back({{"name",sound.Name},{"path",RelativeAssetPath(sound.Path,path)},{"position",SaveVector(sound.Position)},{"volume",sound.Volume},{"pitch",sound.Pitch},{"loop",sound.Loop},{"spatial",sound.Spatial},{"autoplay",sound.Autoplay}});
         }
         for(const auto& script:g_Studio.Scripts)if(script.Allocated)root["scripts"].push_back({{"name",script.Name},{"code",script.Code},{"open",script.Open}});
         const std::string document=root.dump(2);
         if(document.size()>32*1024*1024)throw std::runtime_error("Project exceeds 32 MiB limit");
-        std::ofstream file(temporary,std::ios::binary|std::ios::trunc);file.write(document.data(),std::streamsize(document.size()));file.close();
-        if(!file)throw std::runtime_error("Could not write project temporary file");
-#ifdef _WIN32
-        if(!MoveFileExA(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Could not replace project file");
-#else
-        if(std::rename(temporary.c_str(),path.c_str())!=0)throw std::runtime_error("Could not replace project file");
-#endif
+        WriteAssetFile(temporary,document.data(),document.size());
+        ReplaceAssetFile(temporary,path);
+        g_OpenedProject=AbsoluteAssetPath(path);g_SavedDocumentHash=CompleteDocumentHash();
         AppendConsole("Saved project: "+path+"\n");return true;
     } catch(const std::exception& error) {
         std::remove(temporary.c_str());AppendConsole(std::string("Project save failed: ")+error.what()+"\n");return false;
@@ -81,9 +82,8 @@ static bool SaveStudioProject(const std::string& path) {
 static bool LoadStudioProject(const std::string& path) {
     try {
         if(path.empty()||path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid project path");
-        std::ifstream file(path,std::ios::binary|std::ios::ate);
-        auto size=file.tellg();if(!file||size<0||size>32*1024*1024)throw std::runtime_error("Project missing or larger than 32 MiB");file.seekg(0);
-        nlohmann::json root;file>>root;
+        auto data=ReadAssetFile(path,32*1024*1024);
+        nlohmann::json root=nlohmann::json::parse(data.begin(),data.end());
         if(root.at("schema").get<int>()!=1)throw std::runtime_error("Unsupported project schema");
         const auto& saved=root.at("objects");if(!saved.is_array()||saved.size()>10000)throw std::runtime_error("Invalid object count");
         std::vector<GameObject> objects;objects.reserve(saved.size());size_t totalVertices=0;
@@ -123,7 +123,7 @@ static bool LoadStudioProject(const std::string& path) {
             const auto& savedSounds=root.at("sounds");if(!savedSounds.is_array()||savedSounds.size()>64)throw std::runtime_error("Invalid sound count");
             for(const auto& j:savedSounds){StudioSound sound;sound.Name=j.at("name").get<std::string>();sound.Path=j.at("path").get<std::string>();
                 if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid audio path or name");
-                ReadVector(j.at("position"),sound.Position);sound.Volume=ReadRange(j.at("volume"),0,2);sound.Pitch=ReadRange(j.at("pitch"),.1f,4);sound.Loop=j.at("loop").get<bool>();sound.Spatial=j.at("spatial").get<bool>();sound.Autoplay=j.at("autoplay").get<bool>();sounds.push_back(sound);}
+                ReadVector(j.at("position"),sound.Position);sound.Volume=ReadRange(j.at("volume"),0,2);sound.Pitch=ReadRange(j.at("pitch"),.1f,4);sound.Loop=j.at("loop").get<bool>();sound.Spatial=j.at("spatial").get<bool>();sound.Autoplay=j.at("autoplay").get<bool>();if(!AbsolutePath(sound.Path))sound.Path=NormalizePath(PathDirectory(AbsoluteAssetPath(path))+"/"+sound.Path);sounds.push_back(sound);}
         }
         // Commit only after the complete document has passed validation. Never execute loaded scripts.
         for(const auto& sound:g_Sounds){studio_audio_unload(sound.Id);}
@@ -132,6 +132,34 @@ static bool LoadStudioProject(const std::string& path) {
         g_Physics.Gravity=gravity;g_Physics.Ground=ground;g_Physics.Accumulator=0;g_PhysicsRunning=false;g_SimulationRunning=false;g_PlaySnapshot.clear();g_SelectedObjectIndex=-1;
         g_Studio.RequestDocument=-2;g_Studio.ActiveScript=0;g_Studio.HasSculptUndo=false;g_ObjectHistory.Clear();g_ObjectHistory.Capture(g_Objects);
         if(g_LuaState)ClearUpdateCallback(g_LuaState);
+        g_OpenedProject=AbsoluteAssetPath(path);std::snprintf(g_ProjectPath,sizeof(g_ProjectPath),"%s",path.c_str());g_SavedDocumentHash=CompleteDocumentHash();
         AppendConsole("Loaded project without executing scripts: "+path+"\n");return true;
     } catch(const std::exception& error){AppendConsole(std::string("Project load failed: ")+error.what()+"\n");return false;}
+}
+
+static uint64_t CompleteDocumentHash(){
+    uint64_t h=StudioDocumentHash();
+    for(const auto& doc:g_Studio.Scripts)if(doc.Allocated){for(const char* c=doc.Name;*c;++c)h=(h^static_cast<unsigned char>(*c))*1099511628211ULL;for(const char* c=doc.Code;*c;++c)h=(h^static_cast<unsigned char>(*c))*1099511628211ULL;}
+    return h;
+}
+static int g_PendingProjectAction=0;
+static std::string g_PendingProjectPath;
+static bool g_ExitRequested=false,g_OpenSaveAs=false;
+static void PerformProjectAction(){int action=g_PendingProjectAction;g_PendingProjectAction=0;if(action==1)g_ExitRequested=true;else if(action==2)LoadStudioProject(g_PendingProjectPath);else if(action==3){g_Objects.clear();g_SelectedObjectIndex=-1;}}
+static void RequestProjectAction(int action,const std::string& path=""){if(g_PhysicsRunning)StopSimulation();g_PendingProjectAction=action;g_PendingProjectPath=path;if(!ProjectDirty())PerformProjectAction();}
+static bool SaveCurrentProject(){return SaveStudioProject(g_OpenedProject.empty()?std::string(g_ProjectPath):g_OpenedProject);}
+static void RenderProjectDialogs(){
+    if(g_PendingProjectAction)ImGui::OpenPopup("Unsaved project");
+    if(ImGui::BeginPopupModal("Unsaved project",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        ImGui::TextUnformatted("Save changes before continuing?");
+        if(ImGui::Button("Save")){if(SaveCurrentProject()){PerformProjectAction();ImGui::CloseCurrentPopup();}}
+        ImGui::SameLine();if(ImGui::Button("Discard")){PerformProjectAction();ImGui::CloseCurrentPopup();}
+        ImGui::SameLine();if(ImGui::Button("Cancel")){g_PendingProjectAction=0;ImGui::CloseCurrentPopup();}ImGui::EndPopup();
+    }
+    if(g_OpenSaveAs){ImGui::OpenPopup("Save Project As");g_OpenSaveAs=false;}
+    if(ImGui::BeginPopupModal("Save Project As",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        ImGui::InputText("Path",g_ProjectPath,sizeof(g_ProjectPath));
+        if(ImGui::Button("Save")&&SaveStudioProject(g_ProjectPath))ImGui::CloseCurrentPopup();
+        ImGui::SameLine();if(ImGui::Button("Cancel"))ImGui::CloseCurrentPopup();ImGui::EndPopup();
+    }
 }
