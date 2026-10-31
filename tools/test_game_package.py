@@ -10,6 +10,7 @@ import tempfile
 import zlib
 
 engine = Path(sys.argv[1]).resolve()
+Path("build").mkdir(exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='Lunoryx ') as root:
     directory = Path(root) / 'Игра с пробелами'
     directory.mkdir()
@@ -61,7 +62,12 @@ with tempfile.TemporaryDirectory(prefix='Lunoryx ') as root:
     assert subprocess.run([damaged, '--verify-package'], timeout=60).returncode != 0
     if os.environ.get('LUNORYX_GAME_GUI'):
         environment = dict(os.environ, TEST_TIMEOUT='60', LUNORYX_AUDIO_NULL='1', LUNORYX_GAME_SMOKE='1')
+        capture = environment.get('LUNORYX_CAPTURE_PATH')
+        if capture:
+            Path(capture).parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([game], env=environment, check=True, timeout=180)
+        if capture:
+            assert Path(capture).is_file(), 'Gameplay completed without producing the required screenshot'
     output = Path('build')
     output.mkdir(exist_ok=True)
     shutil.copy2(game, output / 'GemTrail.exe')
