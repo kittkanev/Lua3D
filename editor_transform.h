@@ -171,7 +171,7 @@ inline uint64_t StudioSceneFingerprint(const std::vector<GameObject> &objects) {
     bytes(o.Indices.data(), o.Indices.size() * sizeof(uint32_t));
     bytes(o.VertexColors.data(), o.VertexColors.size() * sizeof(float));
     auto meshBytes=[&](const StudioMesh& m){bytes(m.Positions.data(),m.Positions.size()*4);bytes(m.Indices.data(),m.Indices.size()*4);bytes(m.UV.data(),m.UV.size()*4);bytes(m.Colors.data(),m.Colors.size()*4);for(const auto& f:m.Faces){size_t n=f.size();bytes(&n,sizeof(n));bytes(f.data(),f.size()*4);}bytes(m.FaceMaterials.data(),m.FaceMaterials.size()*4);bytes(m.Seams.data(),m.Seams.size()*8);};
-    meshBytes(o.BaseMesh);bytes(o.UV.data(),o.UV.size()*4);bytes(o.FaceMaterials.data(),o.FaceMaterials.size()*4);bytes(o.Seams.data(),o.Seams.size()*8);
+    meshBytes(o.BaseMesh);bytes(o.UV.data(),o.UV.size()*4);bytes(o.Normals.data(),o.Normals.size()*4);bytes(o.FaceMaterials.data(),o.FaceMaterials.size()*4);bytes(o.Seams.data(),o.Seams.size()*8);
     for(const auto& f:o.Faces){size_t n=f.size();bytes(&n,sizeof(n));bytes(f.data(),f.size()*4);}
     for(const auto& m:o.Materials){bytes(m.Image.data(),m.Image.size());bytes(m.Name.data(),m.Name.size());bytes(m.Texture.data(),m.Texture.size());bytes(m.Color,sizeof(m.Color));bytes(&m.Metallic,sizeof(float));bytes(&m.Roughness,sizeof(float));}
     for(const auto& m:o.Modifiers){bytes(&m.Type,sizeof(m.Type));bytes(&m.Enabled,sizeof(bool));bytes(&m.Axis,sizeof(int));bytes(&m.Count,sizeof(int));bytes(&m.Levels,sizeof(int));bytes(&m.Amount,sizeof(float));bytes(m.Offset,sizeof(m.Offset));}

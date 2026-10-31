@@ -45,8 +45,8 @@ static void RenderStudioAudio() {
       if (ImGui::InputText("Name", name, sizeof(name)))
         sound.Name = name;
       ImGui::TextWrapped("%s", sound.Path.c_str());
-      if(!AssetExists(sound.Path))ImGui::TextColored(ImVec4(1,.5f,.3f,1),"Missing resource: select a replacement below");
-      if(ImGui::Button("Replace with path above")&&path[0]&&AssetExists(path)){studio_audio_unload(sound.Id);sound.Path=AbsoluteAssetPath(path);}
+      if(sound.Data.empty()&&!AssetExists(sound.Path))ImGui::TextColored(ImVec4(1,.5f,.3f,1),"Missing resource: select a replacement below");
+      if(ImGui::Button("Replace with path above")&&path[0]&&AssetExists(path)){studio_audio_unload(sound.Id);sound.Data.clear();sound.Path=AbsoluteAssetPath(path);}
 
       ImGui::SliderFloat("Volume", &sound.Volume, 0, 2);
       ImGui::SliderFloat("Pitch / speed", &sound.Pitch, .1f, 4);

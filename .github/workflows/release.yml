@@ -54,6 +54,13 @@ jobs:
           gh run download "$SOURCE_RUN" --name gltf-validation --dir build/visual
           cp "docs/release-notes-${RELEASE_TAG}.md" build/release/REPORT.md
           find build/visual -name '*.png' -exec cp {} build/release/ \;
+      - name: Attach the tested standalone sample game
+        if: steps.state.outputs.published != 'true'
+        run: |
+          gh run download "$SOURCE_RUN" --name lunoryx-game-demo --dir build/game
+          cp build/game/GemTrail.exe build/release/GemTrail.exe
+          cp build/game/game-windows.png build/release/game-windows.png
+          (cd build/release && sha256sum GemTrail.exe REPORT.md *.png >> SHA256SUMS.txt)
       - name: Create draft and upload verified files
         if: steps.state.outputs.published != 'true'
         run: |

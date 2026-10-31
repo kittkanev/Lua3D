@@ -129,6 +129,13 @@ Use stable object IDs returned by MCP; legacy Lua continues to use array indices
 Save via project_save, then open the project in Studio. Loaded scripts do not run.
 run_lua executes TRUSTED Lua with standard libraries, as in the original editor.
 )DOC"}
+,{"Game / Build",R"DOC(Tools > Character > Game / Build selects a startup script, camera target and output EXE. Existing projects default to no startup script. New third-person example creates Gem Trail. Save the editable project, use Play to test, then Build standalone Game.exe. All imported scene resources are embedded; no compiler is required. Stop restores the editor scene and a fresh Play creates a new Lua state.
+
+Lua: input_key('W') returns a key state; follow_camera(index, distance, pitch) follows an object; game_score(value) sets a nonnegative score and game_score() reads it; hud_text(text) replaces the HUD message; restart_game() schedules a fresh run. WASD / Space control a Character. Use only trusted scripts.
+
+MCP --mcp retains stable object IDs. Lua object indices remain zero-based and shift after removal. mesh_operation(index, action, options_json) supports modifier/apply/boolean/polygonize/extrude/weld/delete/normals/unwrap. Invalid operations leave the original mesh intact.
+
+Modeling limits: Bevel needs a closed oriented mesh; apply modifiers before sculpt or UV editing. GLB import is static and reports unsupported features. Viewport lighting is a simple compatibility-OpenGL preview; physics uses AABBs.)DOC"}
 ,{"Modeling licenses",kModelingLicenses}
 ,{"Additional licenses",kExtensionLicenses}
 ,{"Third-party licenses",kEmbeddedLicenses}

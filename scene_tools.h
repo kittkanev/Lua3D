@@ -128,7 +128,7 @@ inline bool SculptBrush(GameObject& object, Vec3 center, float radius, float str
             result[i+k]=float(value);
         }
     }
-    edited.Vertices.swap(result); object=std::move(edited);return true;
+    edited.Vertices.swap(result);edited.Normals.clear(); object=std::move(edited);return true;
 }
 
 inline int MergeObjects(std::vector<GameObject>& objects,const std::vector<int>& selection,const std::string& name) {

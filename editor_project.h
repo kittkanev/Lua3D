@@ -46,9 +46,7 @@ static void ReadModelFields(const nlohmann::json& j,GameObject& o,const std::str
     if(j.contains("materials")){if(!j["materials"].is_array()||j["materials"].size()>64)throw std::runtime_error("Material limit exceeded");for(const auto& v:j["materials"]){StudioMaterial m;m.Name=v.at("name").get<std::string>();m.Texture=v.at("texture").get<std::string>();m.Image=v.value("image",std::vector<unsigned char>());if(m.Image.size()>16*1024*1024)throw std::runtime_error("Embedded image exceeds limit");if(m.Name.size()>255||m.Texture.size()>511||m.Texture.find('\0')!=std::string::npos)throw std::runtime_error("Invalid material resource");ReadVector(v.at("color"),m.Color,true);m.Metallic=ReadRange(v.at("metallic"),0,1);m.Roughness=ReadRange(v.at("roughness"),0,1);if(!m.Texture.empty()&&!AbsolutePath(m.Texture))m.Texture=NormalizePath(PathDirectory(AbsoluteAssetPath(path))+"/"+m.Texture);o.Materials.push_back(m);}}
     if(!o.FaceMaterials.empty()){if(o.FaceMaterials.size()!=o.Faces.size())throw std::runtime_error("Invalid face material count");for(auto slot:o.FaceMaterials)if(slot>=o.Materials.size())throw std::runtime_error("Invalid material slot");}
 }
-static bool SaveStudioProject(const std::string& path) {
-    std::string temporary=path+".tmp";
-    try {
+static nlohmann::json StudioProjectJson(const std::string& path){
         if(path.empty()||path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid project path");
         if(g_Objects.size()>10000)throw std::runtime_error("Project object limit is 10000");
         size_t totalVertices=0;
@@ -85,9 +83,18 @@ static bool SaveStudioProject(const std::string& path) {
         for(const auto& sound:g_Sounds){
             if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos||!finiteRange(sound.Volume,0,2)||!finiteRange(sound.Pitch,.1f,4))throw std::runtime_error("Invalid sound settings");
             for(float p:sound.Position)if(!std::isfinite(p))throw std::runtime_error("Invalid sound position");
-            root["sounds"].push_back({{"name",sound.Name},{"path",RelativeAssetPath(sound.Path,path)},{"position",SaveVector(sound.Position)},{"volume",sound.Volume},{"pitch",sound.Pitch},{"loop",sound.Loop},{"spatial",sound.Spatial},{"autoplay",sound.Autoplay}});
+            root["sounds"].push_back({{"data",sound.Data},{"name",sound.Name},{"path",sound.Path.empty()?"":RelativeAssetPath(sound.Path,path)},{"position",SaveVector(sound.Position)},{"volume",sound.Volume},{"pitch",sound.Pitch},{"loop",sound.Loop},{"spatial",sound.Spatial},{"autoplay",sound.Autoplay}});
         }
         for(const auto& script:g_Studio.Scripts)if(script.Allocated)root["scripts"].push_back({{"name",script.Name},{"code",script.Code},{"open",script.Open}});
+
+    int startup=-1,allocated=0;for(int i=0;i<8;++i)if(g_Studio.Scripts[size_t(i)].Allocated){if(i==g_Game.StartupScript)startup=allocated;++allocated;}
+    root["game"]={{"startup_script",startup},{"camera_target",g_Game.CameraTarget},{"camera_distance",g_Game.CameraDistance},{"camera_pitch",g_Game.CameraPitch},{"camera_yaw",g_Game.CameraYaw},{"title",g_Game.Title}};
+    return root;
+}
+static bool SaveStudioProject(const std::string& path){
+    std::string temporary=path+".tmp";
+    try {
+        auto root=StudioProjectJson(path);
         const std::string document=root.dump(2);
         if(document.size()>32*1024*1024)throw std::runtime_error("Project exceeds 32 MiB limit");
         WriteAssetFile(temporary,document.data(),document.size());
@@ -102,7 +109,7 @@ static bool LoadStudioProject(const std::string& path) {
     try {
         if(path.empty()||path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid project path");
         auto data=ReadAssetFile(path,32*1024*1024);
-        nlohmann::json root=nlohmann::json::parse(data.begin(),data.end());
+        nlohmann::json root=nlohmann::json::parse(data.begin(),data.end(),[](int depth,nlohmann::json::parse_event_t,nlohmann::json&){if(depth>128)throw std::runtime_error("Project nesting exceeds limit");return true;});
         if(root.at("schema").get<int>()!=1&&root.at("schema").get<int>()!=2)throw std::runtime_error("Unsupported project schema");
         const auto& saved=root.at("objects");if(!saved.is_array()||saved.size()>10000)throw std::runtime_error("Invalid object count");
         std::vector<GameObject> objects;objects.reserve(saved.size());size_t totalVertices=0;
@@ -143,14 +150,17 @@ static bool LoadStudioProject(const std::string& path) {
         std::vector<StudioSound> sounds;
         if(root.contains("sounds")){
             const auto& savedSounds=root.at("sounds");if(!savedSounds.is_array()||savedSounds.size()>64)throw std::runtime_error("Invalid sound count");
-            for(const auto& j:savedSounds){StudioSound sound;sound.Name=j.at("name").get<std::string>();sound.Path=j.at("path").get<std::string>();
+            for(const auto& j:savedSounds){StudioSound sound;sound.Data=j.value("data",std::vector<unsigned char>());if(sound.Data.size()>16*1024*1024)throw std::runtime_error("Embedded audio exceeds budget");sound.Name=j.at("name").get<std::string>();sound.Path=j.at("path").get<std::string>();
                 if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid audio path or name");
-                ReadVector(j.at("position"),sound.Position);sound.Volume=ReadRange(j.at("volume"),0,2);sound.Pitch=ReadRange(j.at("pitch"),.1f,4);sound.Loop=j.at("loop").get<bool>();sound.Spatial=j.at("spatial").get<bool>();sound.Autoplay=j.at("autoplay").get<bool>();if(!AbsolutePath(sound.Path))sound.Path=NormalizePath(PathDirectory(AbsoluteAssetPath(path))+"/"+sound.Path);sounds.push_back(sound);}
+                ReadVector(j.at("position"),sound.Position);sound.Volume=ReadRange(j.at("volume"),0,2);sound.Pitch=ReadRange(j.at("pitch"),.1f,4);sound.Loop=j.at("loop").get<bool>();sound.Spatial=j.at("spatial").get<bool>();sound.Autoplay=j.at("autoplay").get<bool>();if(!sound.Path.empty()&&!AbsolutePath(sound.Path))sound.Path=NormalizePath(PathDirectory(AbsoluteAssetPath(path))+"/"+sound.Path);sounds.push_back(sound);}
         }
+        StudioGameSettings game;
+        if(root.contains("game")){const auto& value=root["game"];game.StartupScript=int(ReadRange(value.at("startup_script"),-1,7));if(!value.at("camera_target").is_number_unsigned()&&!value.at("camera_target").is_number_integer())throw std::runtime_error("Invalid camera target");game.CameraTarget=value.at("camera_target").get<uint64_t>();game.CameraDistance=ReadRange(value.at("camera_distance"),.2f,1000);game.CameraPitch=ReadRange(value.at("camera_pitch"),-85,85);game.CameraYaw=ReadRange(value.at("camera_yaw"),-180,180);game.Title=value.at("title").get<std::string>();if(game.Title.size()>255||game.Title.find('\0')!=std::string::npos)throw std::runtime_error("Invalid game title");}
         // Commit only after the complete document has passed validation. Never execute loaded scripts.
         for(const auto& sound:g_Sounds){studio_audio_unload(sound.Id);}
         g_Sounds.swap(sounds);g_SelectedSound=-1;
         for(const auto& o:objects)ReserveObjectId(o.Id);
+        g_Game=game;
         g_Objects.swap(objects);g_Studio.Scripts.swap(*scripts);std::copy(top,top+3,g_SkyTop);std::copy(bottom,bottom+3,g_SkyBottom);g_SkyPreset=preset;
         g_Physics.Gravity=gravity;g_Physics.Ground=ground;g_Physics.Accumulator=0;g_PhysicsRunning=false;g_SimulationRunning=false;g_PlaySnapshot.clear();g_SelectedObjectIndex=-1;
         g_Studio.RequestDocument=-2;g_Studio.ActiveScript=0;g_Studio.HasSculptUndo=false;g_ObjectHistory.Clear();g_ObjectHistory.Capture(g_Objects);
@@ -161,14 +171,14 @@ static bool LoadStudioProject(const std::string& path) {
 }
 
 static uint64_t CompleteDocumentHash(){
-    uint64_t h=StudioDocumentHash();
+    uint64_t h=StudioDocumentHash();h^=uint64_t(g_Game.StartupScript);h^=g_Game.CameraTarget;for(char c:g_Game.Title)h=(h^static_cast<unsigned char>(c))*1099511628211ULL;
     for(const auto& doc:g_Studio.Scripts)if(doc.Allocated){for(const char* c=doc.Name;*c;++c)h=(h^static_cast<unsigned char>(*c))*1099511628211ULL;for(const char* c=doc.Code;*c;++c)h=(h^static_cast<unsigned char>(*c))*1099511628211ULL;}
     return h;
 }
 static int g_PendingProjectAction=0;
 static std::string g_PendingProjectPath;
 static bool g_ExitRequested=false,g_OpenSaveAs=false;
-static void PerformProjectAction(){int action=g_PendingProjectAction;g_PendingProjectAction=0;if(action==1)g_ExitRequested=true;else if(action==2)LoadStudioProject(g_PendingProjectPath);else if(action==3){g_Objects.clear();g_SelectedObjectIndex=-1;}}
+static void PerformProjectAction(){int action=g_PendingProjectAction;g_PendingProjectAction=0;if(action==1)g_ExitRequested=true;else if(action==2)LoadStudioProject(g_PendingProjectPath);else if(action==3){g_Objects.clear();g_SelectedObjectIndex=-1;}else if(action==4)CreateSampleGame();}
 static void RequestProjectAction(int action,const std::string& path=""){if(g_PhysicsRunning)StopSimulation();g_PendingProjectAction=action;g_PendingProjectPath=path;if(!ProjectDirty())PerformProjectAction();}
 static bool SaveCurrentProject(){return SaveStudioProject(g_OpenedProject.empty()?std::string(g_ProjectPath):g_OpenedProject);}
 static void RenderProjectDialogs(){
