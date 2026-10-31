@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <atomic>
 #include <algorithm>
 #include <limits>
 
@@ -17,7 +18,7 @@ enum class MeshType : int {
     Plane = 4
 };
 
-static const char* GetMeshTypeName(MeshType type) {
+inline const char* GetMeshTypeName(MeshType type) {
     switch (type) {
         case MeshType::Cube:     return "Cube";
         case MeshType::Pyramid:  return "Pyramid";
@@ -28,7 +29,7 @@ static const char* GetMeshTypeName(MeshType type) {
     }
 }
 
-static MeshType ParseMeshType(const std::string& typeStr) {
+inline MeshType ParseMeshType(const std::string& typeStr) {
     std::string lower = typeStr;
     for (char& c : lower) {
         if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
@@ -47,8 +48,13 @@ struct ObjectProperty {
     std::string TextValue;
 };
 
+#include "studio_mesh_types.h"
+
 // Enhanced GameObject structure (Rotation is stored in degrees for UI clarity and converted to radians on GLB export)
-inline uint64_t NewObjectId() { static uint64_t next=0; return ++next; }
+inline std::atomic<uint64_t>& ObjectIdCounter(){static std::atomic<uint64_t> next{0};return next;}
+inline uint64_t NewObjectId() {return ++ObjectIdCounter();}
+inline void ReserveObjectId(uint64_t id){uint64_t old=ObjectIdCounter().load();while(old<id&&!ObjectIdCounter().compare_exchange_weak(old,id)){} }
+
 
 struct GameObject {
     uint64_t Id = NewObjectId();
@@ -77,13 +83,21 @@ struct GameObject {
     std::vector<uint32_t> Indices;
     std::vector<float> VertexColors;
     std::map<std::string, ObjectProperty> Properties;
+    StudioMesh BaseMesh;
+    std::vector<std::vector<uint32_t>> Faces;
+    std::vector<float> UV,Normals;
+    std::vector<uint32_t> FaceMaterials;
+    std::vector<uint64_t> Seams;
+    std::vector<StudioMaterial> Materials;
+    std::vector<StudioModifier> Modifiers;
+
 
     GameObject(const std::string& name, MeshType type = MeshType::Cube)
         : Name(name), Type(type) {}
 };
 
 // Fixes Bug #2: converts UI degrees to radians before computing quaternion (intrinsic XYZ / Qx * Qy * Qz matching glRotatef order)
-static std::vector<double> EulerDegreesToQuaternion(float rxDeg, float ryDeg, float rzDeg) {
+inline std::vector<double> EulerDegreesToQuaternion(float rxDeg, float ryDeg, float rzDeg) {
     const double degToRad = PI / 180.0;
     double hx = (rxDeg * degToRad) * 0.5;
     double hy = (ryDeg * degToRad) * 0.5;
@@ -103,7 +117,7 @@ static std::vector<double> EulerDegreesToQuaternion(float rxDeg, float ryDeg, fl
 }
 
 // Generate vertex positions and triangle indices for any MeshType for GLB export
-static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPositions, std::vector<uint16_t>& outIndices) {
+inline void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPositions, std::vector<uint16_t>& outIndices) {
     outPositions.clear();
     outIndices.clear();
 
@@ -201,7 +215,7 @@ static void GeneratePrimitiveMeshData(MeshType type, std::vector<float>& outPosi
 
 
 // Copy before growing the vector: callers may reference an element of objects.
-static int DuplicateObject(std::vector<GameObject>& objects, int index, const std::string& name) {
+inline int DuplicateObject(std::vector<GameObject>& objects, int index, const std::string& name) {
     if (index < 0 || static_cast<size_t>(index) >= objects.size() || name.size()>255) return -1;
     GameObject copy = objects[index];
     copy.Name = name;
@@ -213,7 +227,7 @@ static int DuplicateObject(std::vector<GameObject>& objects, int index, const st
 
 // Strict decimal seconds; malformed or zero values disable the timeout.
 // Clamp below the SDL 32-bit tick wrap period.
-static uint64_t ParseTestTimeoutMs(const char* value) {
+inline uint64_t ParseTestTimeoutMs(const char* value) {
     if (!value || !*value) return 0;
     const uint64_t limit = 3600000;
     uint64_t seconds = 0;

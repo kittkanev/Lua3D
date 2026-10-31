@@ -22,3 +22,6 @@ __pycache__/
 *.pyc
 
 /tests/studio_audio_tests
+
+/tests/modeling_tests
+/core

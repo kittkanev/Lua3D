@@ -26,6 +26,7 @@ extern "C" {
 #include <tiny_gltf.h>
 
 #include "scene_tools.h"
+#include "mesh_modeling.h"
 #include "file_output.h"
 #include "asset_io.h"
 #include "engine_version.h"
@@ -536,6 +537,7 @@ static int l_get_material(lua_State* L) {
 }
 
 #include "scene_bindings.h"
+#include "model_commands.h"
 
 static void InitLuaState() {
     ShutdownLuaState();
@@ -577,6 +579,7 @@ static void InitLuaState() {
     lua_register(g_LuaState, "get_time",         LuaBinding<l_get_time>);
     lua_register(g_LuaState, "export_glb",       LuaBinding<l_export_glb>);
     RegisterSoundBindings(g_LuaState);
+    lua_register(g_LuaState,"mesh_operation",LuaBinding<l_mesh_operation>);
 }
 
 static void ShutdownLuaState() {
@@ -962,6 +965,11 @@ int main(int argc, char* argv[]) {
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
     g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);g_SavedDocumentHash=CompleteDocumentHash();
+    if(argc>1&&std::strcmp(argv[1],"--report-modeling")==0){
+        g_Objects.clear();GameObject box("Beveled mesh");auto mesh=Model::FromObject(box);Model::Polygonize(mesh);Model::ToObject(box,mesh);StudioModifier bevel;bevel.Type=StudioModifier::Bevel;bevel.Amount=.12f;Model::AddModifier(box,bevel);box.Position[0]=-1.3f;box.Position[1]=.6f;box.Color[0]=.2f;box.Color[1]=.75f;box.Color[2]=.9f;box.Selected=true;g_Objects.push_back(box);
+        GameObject a("Boolean A"),b("Boolean B");b.Position[0]=.4f;b.Position[1]=.4f;auto result=Model::Boolean(a,b,1);result.Name="Boolean Difference";result.Position[0]=1.2f;result.Position[1]=.6f;g_Objects.push_back(result);g_SelectedObjectIndex=0;
+    }
+
 
     const Uint32 start_time = SDL_GetTicks();
     const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
@@ -1112,6 +1120,7 @@ int main(int argc, char* argv[]) {
         }
         ImGui::End();
 
+        PollModelJob();
         RenderProjectDialogs();if(g_ExitRequested)done=true;
         RenderStudio(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget,dt);
         gizmoSmoke.Check();if(gizmoSmoke.Done)done=true;

@@ -59,7 +59,7 @@ inline bool WorldBounds(const GameObject& o, Bounds& b) {
 }
 
 inline bool MakeEditable(GameObject& object, int subdivisions=0) {
-    if(subdivisions<0 || subdivisions>4) return false;
+    if(subdivisions<0 || subdivisions>4 || !object.Modifiers.empty()) return false;
     std::vector<float> vertices, colors=object.VertexColors;
     std::vector<uint32_t> indices;
     ObjectMesh(object,vertices,indices);
@@ -85,6 +85,7 @@ inline bool MakeEditable(GameObject& object, int subdivisions=0) {
         if(vertices.size()/3>MAX_EDIT_VERTICES) return false;
         indices.swap(refined);
     }
+    if(subdivisions){object.Faces.clear();object.UV.clear();object.Normals.clear();object.FaceMaterials.clear();object.Seams.clear();}
     object.Vertices.swap(vertices); object.Indices.swap(indices); object.VertexColors.swap(colors);
     return true;
 }

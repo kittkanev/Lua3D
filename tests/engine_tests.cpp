@@ -167,7 +167,7 @@ int main() {
     {std::ofstream broken("tests/broken-project.lunoryx");broken<<"{bad json";}
     assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects[0].Name==savedName);
     nlohmann::json corrupt;{std::ifstream f("tests/test-project.lunoryx");f>>corrupt;}
-    auto legacy=corrupt;legacy.erase("sounds");{std::ofstream f("tests/legacy-project.lunoryx");f<<legacy;}assert(LoadStudioProject("tests/legacy-project.lunoryx")&&g_Sounds.empty());std::remove("tests/legacy-project.lunoryx");
+    auto legacy=corrupt;legacy["schema"]=1;legacy.erase("sounds");{std::ofstream f("tests/legacy-project.lunoryx");f<<legacy;}assert(LoadStudioProject("tests/legacy-project.lunoryx")&&g_Sounds.empty());std::remove("tests/legacy-project.lunoryx");
     corrupt["objects"].back()["indices"][0]=4294967295u;
     {std::ofstream broken("tests/broken-project.lunoryx");broken<<corrupt;}
     assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects.size()==savedCount);
@@ -181,6 +181,9 @@ int main() {
         assert(lua_gettop(g_LuaState) == 0);
         ShutdownLuaState();
     }
+    g_Objects.clear();g_Objects.emplace_back("Stacked");StudioModifier mirror;Model::AddModifier(g_Objects[0],mirror);uint64_t stable=g_Objects[0].Id;
+    assert(SaveStudioProject("tests/modeling.lunoryx"));g_Objects.clear();assert(LoadStudioProject("tests/modeling.lunoryx"));assert(g_Objects[0].Id==stable&&g_Objects[0].Modifiers.size()==1&&g_Objects[0].BaseMesh.Faces.size()==12);
+    InitLuaState();CheckLua("assert(mesh_operation(0,'apply')==0)");ShutdownLuaState();assert(g_Objects[0].Modifiers.empty());
     // Completed operations cover audio and environment, and Play restores both.
     g_PhysicsRunning=false;g_ObjectHistory.Clear();g_Sounds.clear();g_ObjectHistory.Capture(g_Objects);
     float originalSky=g_SkyTop[0];g_SkyTop[0]=.37f;StudioSound tone;tone.Path="missing.wav";g_Sounds.push_back(tone);g_ObjectHistory.Capture(g_Objects);

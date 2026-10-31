@@ -1,6 +1,6 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP -I/usr/include/lua5.4 -I/usr/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps -isystem ./win_deps/nlohmann
-LDFLAGS = -llua5.4 -lSDL2 -lGL -lm -ldl -lpthread
+LDFLAGS = build/deps/manifold-linux/src/libmanifold.a -llua5.4 -lSDL2 -lGL -lm -ldl -lpthread
 
 CXXFLAGS += $(EXTRA_CXXFLAGS)
 LDFLAGS += $(EXTRA_LDFLAGS)
@@ -15,7 +15,7 @@ IMGUI_SRC = \
 	imgui/backends/imgui_impl_opengl3.cpp
 
 SRC = main.cpp extensions/ImGuizmo/ImGuizmo.cpp $(IMGUI_SRC)
-OBJS = $(SRC:.cpp=.o) extensions/audio/audio_backend.o
+OBJS = $(SRC:.cpp=.o) extensions/audio/audio_backend.o extensions/modeling/boolean_adapter.o
 DEPS = $(OBJS:.o=.d) tests/engine_tests.d
 
 all: engine
@@ -34,8 +34,9 @@ clean:
 
 .PHONY: all clean test test-integration
 
-test: tests/core_tests
+test: tests/core_tests tests/modeling_tests
 	./tests/core_tests
+	./tests/modeling_tests
 
 tests/core_tests: tests/core_tests.cpp scene_core.h scene_tools.h editor_transform.h
 	$(CXX) -std=c++11 -Wall -Wextra -pedantic -Werror -O2 $< -o $@
@@ -51,3 +52,12 @@ extensions/audio/audio_backend.o: extensions/audio/audio_backend.c extensions/au
 
 tests/studio_audio_tests: tests/studio_audio_tests.c extensions/audio/audio_backend.o
 	$(CC) -std=c11 -Wall -Wextra -Werror -O2 $^ -lm -ldl -lpthread $(EXTRA_LDFLAGS) -o $@
+
+extensions/modeling/boolean_adapter.o: extensions/modeling/boolean_adapter.cpp extensions/modeling/boolean_adapter.h build/deps/manifold-linux/src/libmanifold.a
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Ibuild/deps/manifold/include -Ibuild/deps/manifold-linux/include $(EXTRA_CXXFLAGS) -c $< -o $@
+
+build/deps/manifold-linux/src/libmanifold.a:
+	bash tools/prepare_modeling.sh
+
+tests/modeling_tests: tests/modeling_tests.cpp mesh_modeling.h studio_mesh_types.h extensions/modeling/boolean_adapter.o
+	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $(EXTRA_CXXFLAGS) $< extensions/modeling/boolean_adapter.o build/deps/manifold-linux/src/libmanifold.a -lpthread $(EXTRA_LDFLAGS) -o $@
