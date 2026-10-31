@@ -27,6 +27,7 @@ extern "C" {
 
 #include "scene_tools.h"
 #include "mesh_modeling.h"
+#include "mesh_uv.h"
 #include "file_output.h"
 #include "asset_io.h"
 #include "engine_version.h"
@@ -844,44 +845,34 @@ static int ExportAccessor(tinygltf::Model& model,const void* data,size_t bytes,s
     model.accessors.push_back(accessor);return int(model.accessors.size())-1;
 }
 
+#include "scene_assets.h"
+
 static bool ExportGLB(const std::string& filename) {
-    if(filename.empty()||filename.find('\0')!=std::string::npos)return false;
-    tinygltf::Model model;model.asset.version="2.0";model.asset.generator=LUNORYX_NAME " " LUNORYX_VERSION;
-    model.buffers.emplace_back();tinygltf::Scene scene;scene.name=LUNORYX_NAME " Scene";
-    for(const auto& obj:g_Objects) {
-        if(!obj.Visible)continue;
-        std::vector<float> p;std::vector<uint32_t> indices;ObjectMesh(obj,p,indices);
-        if(p.empty()||indices.empty())return false;
-        std::vector<double> lo={p[0],p[1],p[2]},hi=lo;
-        for(size_t i=0;i<p.size();i+=3)for(int k=0;k<3;++k){if(!std::isfinite(p[i+k]))return false;lo[k]=std::min(lo[k],double(p[i+k]));hi[k]=std::max(hi[k],double(p[i+k]));}
-        int positions=ExportAccessor(model,p.data(),p.size()*sizeof(float),p.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER,lo,hi);
-        int elements=ExportAccessor(model,indices.data(),indices.size()*sizeof(uint32_t),indices.size(),TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT,TINYGLTF_TYPE_SCALAR,TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);
-        tinygltf::Material material;material.name=obj.Name+" Material";
-        material.pbrMetallicRoughness.baseColorFactor={obj.Color[0],obj.Color[1],obj.Color[2],1};
-        material.pbrMetallicRoughness.metallicFactor=obj.Metallic;material.pbrMetallicRoughness.roughnessFactor=obj.Roughness;
-        material.doubleSided=obj.Type==MeshType::Plane;
-        int materialIndex=int(model.materials.size());model.materials.push_back(material);
-        tinygltf::Primitive primitive;primitive.attributes["POSITION"]=positions;primitive.indices=elements;primitive.material=materialIndex;primitive.mode=TINYGLTF_MODE_TRIANGLES;
-        if(!obj.VertexColors.empty())primitive.attributes["COLOR_0"]=ExportAccessor(model,obj.VertexColors.data(),obj.VertexColors.size()*sizeof(float),obj.VertexColors.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER);
-        tinygltf::Mesh mesh;mesh.name=obj.Name;mesh.primitives.push_back(primitive);
-        tinygltf::Node node;node.name=obj.Name;node.mesh=int(model.meshes.size());
-        node.translation={obj.Position[0],obj.Position[1],obj.Position[2]};node.scale={obj.Scale[0],obj.Scale[1],obj.Scale[2]};
-        node.rotation=EulerDegreesToQuaternion(obj.Rotation[0],obj.Rotation[1],obj.Rotation[2]);
-        model.meshes.push_back(mesh);scene.nodes.push_back(int(model.nodes.size()));model.nodes.push_back(node);
-    }
-    if(model.buffers[0].data.empty())model.buffers.clear();
-    model.scenes.push_back(scene);model.defaultScene=0;
-    std::unique_ptr<std::FILE,int(*)(std::FILE*)> file(OpenBinaryOutput(filename),std::fclose);
-    if(!file)return false;
-    bool result=false;
-    {
-        BinaryOutputBuffer buffer(file.get());std::ostream output(&buffer);
-        tinygltf::TinyGLTF writer;result=writer.WriteGltfSceneToStream(&model,output,false,true);
-        output.flush();result=result&&output.good();
-    }
-    return std::fclose(file.release())==0&&result;
+    try {
+        if(filename.empty()||filename.find('\0')!=std::string::npos)return false;
+        tinygltf::Model model;model.asset.version="2.0";model.asset.generator=LUNORYX_NAME " " LUNORYX_VERSION;model.buffers.emplace_back();tinygltf::Scene scene;scene.name="Lunoryx Scene";
+        for(const auto& object:g_Objects){if(!object.Visible)continue;auto data=Model::FromObject(object);Model::Check(data);if(data.Normals.size()!=data.Positions.size())Model::Triangulate(data);
+            std::vector<double> low={data.Positions[0],data.Positions[1],data.Positions[2]},high=low;for(size_t i=0;i<data.Positions.size();i+=3)for(int k=0;k<3;++k){low[k]=std::min(low[k],double(data.Positions[i+k]));high[k]=std::max(high[k],double(data.Positions[i+k]));}
+            int positions=ExportAccessor(model,data.Positions.data(),data.Positions.size()*4,data.Positions.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER,low,high);
+            int normals=ExportAccessor(model,data.Normals.data(),data.Normals.size()*4,data.Normals.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER);
+            int uv=data.UV.empty()?-1:ExportAccessor(model,data.UV.data(),data.UV.size()*4,data.UV.size()/2,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC2,TINYGLTF_TARGET_ARRAY_BUFFER);
+            int colors=data.Colors.empty()?-1:ExportAccessor(model,data.Colors.data(),data.Colors.size()*4,data.Colors.size()/3,TINYGLTF_COMPONENT_TYPE_FLOAT,TINYGLTF_TYPE_VEC3,TINYGLTF_TARGET_ARRAY_BUFFER);
+            std::map<uint32_t,std::vector<uint32_t>> groups;size_t triangle=0;for(size_t face=0;face<data.Faces.size();++face){uint32_t slot=data.FaceMaterials.empty()?0:data.FaceMaterials[face];auto& indices=groups[slot];for(size_t t=0;t+2<data.Faces[face].size();++t,++triangle)indices.insert(indices.end(),data.Indices.begin()+triangle*3,data.Indices.begin()+triangle*3+3);}
+            tinygltf::Mesh mesh;mesh.name=object.Name;
+            for(const auto& group:groups){StudioMaterial fallback;std::copy(object.Color,object.Color+3,fallback.Color);fallback.Metallic=object.Metallic;fallback.Roughness=object.Roughness;const auto& source=group.first<object.Materials.size()?object.Materials[group.first]:fallback;
+                tinygltf::Material material;material.name=source.Name;material.doubleSided=object.Type==MeshType::Plane;material.pbrMetallicRoughness.baseColorFactor={source.Color[0],source.Color[1],source.Color[2],1};if(!object.Materials.empty())for(int k=0;k<3;++k)material.pbrMetallicRoughness.baseColorFactor[k]*=object.Color[k];material.pbrMetallicRoughness.metallicFactor=source.Metallic;material.pbrMetallicRoughness.roughnessFactor=source.Roughness;
+                if(!source.Texture.empty()||!source.Image.empty()){auto decoded=DecodeMaterialImage(source);auto encoded=EncodeImage(decoded);auto& binary=model.buffers[0].data;while(binary.size()%4)binary.push_back(0);tinygltf::BufferView imageView;imageView.buffer=0;imageView.byteOffset=binary.size();imageView.byteLength=encoded.size();binary.insert(binary.end(),encoded.begin(),encoded.end());tinygltf::Image image;image.bufferView=int(model.bufferViews.size());image.mimeType="image/png";model.bufferViews.push_back(imageView);tinygltf::Texture texture;texture.source=int(model.images.size());model.images.push_back(std::move(image));material.pbrMetallicRoughness.baseColorTexture.index=int(model.textures.size());model.textures.push_back(texture);}
+                tinygltf::Primitive primitive;primitive.attributes["POSITION"]=positions;primitive.attributes["NORMAL"]=normals;if(uv>=0)primitive.attributes["TEXCOORD_0"]=uv;if(colors>=0)primitive.attributes["COLOR_0"]=colors;primitive.mode=TINYGLTF_MODE_TRIANGLES;primitive.material=int(model.materials.size());model.materials.push_back(std::move(material));primitive.indices=ExportAccessor(model,group.second.data(),group.second.size()*4,group.second.size(),TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT,TINYGLTF_TYPE_SCALAR,TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);mesh.primitives.push_back(std::move(primitive));
+            }
+            tinygltf::Node node;node.name=object.Name;node.mesh=int(model.meshes.size());node.translation={object.Position[0],object.Position[1],object.Position[2]};node.scale={object.Scale[0],object.Scale[1],object.Scale[2]};node.rotation=EulerDegreesToQuaternion(object.Rotation[0],object.Rotation[1],object.Rotation[2]);scene.nodes.push_back(int(model.nodes.size()));model.nodes.push_back(std::move(node));model.meshes.push_back(std::move(mesh));
+        }
+        if(model.buffers[0].data.empty())model.buffers.clear();
+        model.scenes.push_back(scene);model.defaultScene=0;
+        std::unique_ptr<std::FILE,int(*)(std::FILE*)> file(OpenBinaryOutput(filename),std::fclose);if(!file)return false;bool result=false;{BinaryOutputBuffer buffer(file.get());std::ostream output(&buffer);tinygltf::TinyGLTF writer;result=writer.WriteGltfSceneToStream(&model,output,false,true);output.flush();result=result&&output.good();}return std::fclose(file.release())==0&&result;
+    }catch(const std::exception& e){AppendConsole(std::string("GLB export failed: ")+e.what()+"\n");return false;}
 }
 
+#include "material_render.h"
 #include "editor_audio.h"
 #include "editor_ui.h"
 #include "studio_mcp.h"
@@ -971,6 +962,9 @@ int main(int argc, char* argv[]) {
     }
 
 
+    if(argc>1&&std::strcmp(argv[1],"--report-uv")==0){
+        g_Objects.clear();GameObject box("UV checker material");auto mesh=Model::FromObject(box);Model::Unwrap(mesh);Model::ToObject(box,mesh);StudioMaterial material;tinygltf::Image image;image.width=image.height=64;image.component=4;image.bits=8;image.image.resize(64*64*4);for(int y=0;y<64;++y)for(int x=0;x<64;++x){int i=(y*64+x)*4;bool check=(x/8+y/8)%2;image.image[i]=check?40:225;image.image[i+1]=check?150:225;image.image[i+2]=check?180:225;image.image[i+3]=255;}material.Image=EncodeImage(image);box.Materials.push_back(material);box.Color[0]=box.Color[1]=box.Color[2]=1;box.Scale[0]=box.Scale[1]=box.Scale[2]=2;box.Position[1]=1;box.Selected=true;g_Objects.push_back(box);g_SelectedObjectIndex=0;g_ShowUV=true;g_ReportUV=true;ClearConsole();AppendConsole("UV: xatlas automatic charts, packed islands and embedded checker texture.\n");
+    }
     const Uint32 start_time = SDL_GetTicks();
     const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
 
@@ -1012,7 +1006,7 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
                 RequestProjectAction(1);
 
-            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")RequestProjectAction(2,path);else ImportStudioSound(path);}
+            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")RequestProjectAction(2,path);else if(extension==".glb")ImportStudioGLB(path);else ImportStudioSound(path);}
             if(event.type==SDL_KEYDOWN&&!event.key.repeat) {
                 if(event.key.keysym.sym==SDLK_s&&(event.key.keysym.mod&KMOD_CTRL))SaveCurrentProject();
                 if(event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
@@ -1086,6 +1080,8 @@ int main(int argc, char* argv[]) {
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 ImGui::InputText("Project path",g_ProjectPath,sizeof(g_ProjectPath));
+                if(ImGui::MenuItem("Import static GLB..."))ImGui::OpenPopup("Import GLB");
+                if(ImGui::BeginPopup("Import GLB")){static char modelPath[512]="model.glb";ImGui::InputText("GLB path",modelPath,sizeof(modelPath));if(ImGui::Button("Import")){ImportStudioGLB(modelPath);ImGui::CloseCurrentPopup();}ImGui::EndPopup();}
                 if(ImGui::MenuItem("Save Project","Ctrl+S"))SaveCurrentProject();
                 if(ImGui::MenuItem("Save Project As..."))g_OpenSaveAs=true;
                 if(ImGui::MenuItem("Load Project"))RequestProjectAction(2,g_ProjectPath);
@@ -1199,7 +1195,8 @@ int main(int argc, char* argv[]) {
                 glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             }
 
-            if(!obj.Vertices.empty())RenderEditableMesh(obj);
+            if(!obj.Materials.empty()||!obj.Normals.empty())RenderLitMesh(obj);
+            else if(!obj.Vertices.empty())RenderEditableMesh(obj);
             else switch (obj.Type) {
                 case MeshType::Cube:     RenderCube(obj.Color);     break;
                 case MeshType::Pyramid:  RenderPyramid(obj.Color);  break;
@@ -1244,6 +1241,7 @@ int main(int argc, char* argv[]) {
     PersistStudioPreferences();
     ShutdownLuaState();
     studio_audio_shutdown();
+    ClearStudioTextures();
     if(g_LogoTexture)glDeleteTextures(1,&g_LogoTexture);
     g_ViewportTarget.Destroy();
     ImGui_ImplOpenGL3_Shutdown();

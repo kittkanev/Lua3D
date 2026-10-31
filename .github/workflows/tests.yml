@@ -25,13 +25,14 @@ jobs:
           cache: npm
           cache-dependency-path: tools/package-lock.json
       - name: Validate binary glTF independently
-        run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb
+        run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb && node tools/validate_glb.cjs tests/textured.glb
       - name: Smoke test editor and timeout
         run: |
           mkdir -p build
           timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
           timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=8 LUNORYX_GIZMO_SMOKE=1 LUNORYX_CAPTURE_PATH=build/gizmo-smoke.png ./engine
           timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 LUNORYX_CAPTURE_PATH=build/modeling.png ./engine --report-modeling
+          timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=2 LUNORYX_CAPTURE_PATH=build/uv.png ./engine --report-uv
       - uses: actions/upload-artifact@v4
         with:
           name: gltf-validation
@@ -40,6 +41,7 @@ jobs:
             build/studio-smoke.png
             build/gizmo-smoke.png
             build/modeling.png
+            build/uv.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
