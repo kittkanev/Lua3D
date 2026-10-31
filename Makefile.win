@@ -1,66 +1,66 @@
-CXX = g++
-CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP -I/usr/include/lua5.4 -I/usr/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps -isystem ./win_deps/nlohmann
-LDFLAGS = build/deps/manifold-linux/src/libmanifold.a -llua5.4 -lSDL2 -lGL -lm -ldl -lpthread
+CXX = x86_64-w64-mingw32-g++
+LUA_DIR ?= build/deps/lua-5.4.6/src
+SDL_DIR ?= build/deps/SDL2-2.30.0/x86_64-w64-mingw32
+BUILD_DIR ?= build/win
+CPPFLAGS = -DSDL_MAIN_HANDLED -DNOMINMAX -I$(LUA_DIR) -I$(SDL_DIR)/include/SDL2 -I./imgui -I./imgui/backends -isystem ./win_deps
+CXXFLAGS = -Wall -Wextra -Werror -O2 -std=c++11 -MMD -MP
+LDLIBS = build/deps/manifold-windows/src/libmanifold.a -L$(LUA_DIR) -llua $(SDL_DIR)/lib/libSDL2.a -lopengl32 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lsetupapi -lversion -luuid -lksuser -lavrt
+LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 
-CXXFLAGS += $(EXTRA_CXXFLAGS)
-LDFLAGS += $(EXTRA_LDFLAGS)
+IMGUI_SRC = extensions/ImGuizmo/ImGuizmo.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
+OBJS = $(addprefix $(BUILD_DIR)/obj/,$(IMGUI_SRC:.cpp=.o)) $(BUILD_DIR)/obj/extensions/audio/audio_backend.o $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o
+ENGINE_OBJ = $(BUILD_DIR)/obj/main.o
+TEST_OBJ = $(BUILD_DIR)/obj/tests/engine_tests.o
+DEPS = $(OBJS:.o=.d) $(ENGINE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 
-IMGUI_SRC = \
-	imgui/imgui.cpp \
-	imgui/imgui_demo.cpp \
-	imgui/imgui_draw.cpp \
-	imgui/imgui_tables.cpp \
-	imgui/imgui_widgets.cpp \
-	imgui/backends/imgui_impl_sdl2.cpp \
-	imgui/backends/imgui_impl_opengl3.cpp
+.PHONY: all tests package clean
+all: $(BUILD_DIR)/engine.exe
 
-SRC = main.cpp extensions/ImGuizmo/ImGuizmo.cpp $(IMGUI_SRC)
-OBJS = $(SRC:.cpp=.o) extensions/audio/audio_backend.o extensions/modeling/boolean_adapter.o
-DEPS = $(OBJS:.o=.d) tests/engine_tests.d
+$(BUILD_DIR)/engine.exe: $(ENGINE_OBJ) $(OBJS) $(BUILD_DIR)/app-icon.o
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -mwindows -o $@
 
-all: engine
+$(BUILD_DIR)/engine_tests.exe: $(TEST_OBJ) $(OBJS)
+	$(CXX) $^ $(LDLIBS) $(LDFLAGS) -o $@
 
-engine: $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+$(BUILD_DIR)/core_tests.exe: tests/core_tests.cpp scene_core.h scene_tools.h editor_transform.h
+	mkdir -p $(BUILD_DIR)
+	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< $(LDFLAGS) -o $@
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(BUILD_DIR)/app-icon.o: assets/app.rc assets/lunoryx.ico
+	mkdir -p $(BUILD_DIR)
+	x86_64-w64-mingw32-windres -i $< -o $@
+
+$(BUILD_DIR)/obj/%.o: %.cpp
+	mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+tests: $(BUILD_DIR)/core_tests.exe $(BUILD_DIR)/engine_tests.exe
+
+package: all tests
+	cp README.md $(BUILD_DIR)/
+	cp -r examples docs $(BUILD_DIR)/
+	mkdir -p $(BUILD_DIR)/licenses
+	cp docs/licenses/* $(BUILD_DIR)/licenses/
 
 -include $(DEPS)
 
 clean:
-	rm -f engine $(OBJS) $(DEPS) tests/core_tests tests/engine_tests
+	rm -rf $(BUILD_DIR)
 
+$(BUILD_DIR)/obj/extensions/audio/audio_backend.o: extensions/audio/audio_backend.c extensions/audio/audio_backend.h extensions/audio/miniaudio.h extensions/audio/stb_vorbis.c
+	mkdir -p $(dir $@)
+	x86_64-w64-mingw32-gcc -std=c11 -Wall -Wextra -Werror -Wno-unused-function -O2 -c $< -o $@
 
-.PHONY: all clean test test-integration
+$(BUILD_DIR)/studio_audio_tests.exe: tests/studio_audio_tests.c $(BUILD_DIR)/obj/extensions/audio/audio_backend.o
+	x86_64-w64-mingw32-gcc -std=c11 -Wall -Wextra -Werror -O2 $^ -lwinmm -lole32 -luuid -lksuser -lavrt -static-libgcc -o $@
+tests: $(BUILD_DIR)/studio_audio_tests.exe
 
-test: tests/core_tests tests/modeling_tests
-	./tests/core_tests
-	./tests/modeling_tests
+$(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o: extensions/modeling/boolean_adapter.cpp extensions/modeling/boolean_adapter.h build/deps/manifold-windows/src/libmanifold.a
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Ibuild/deps/manifold/include -Ibuild/deps/manifold-windows/include -c $< -o $@
 
-tests/core_tests: tests/core_tests.cpp scene_core.h scene_tools.h editor_transform.h
-	$(CXX) -std=c++11 -Wall -Wextra -pedantic -Werror -O2 $< -o $@
-
-test-integration: tests/engine_tests
-	./tests/engine_tests
-
-tests/engine_tests: tests/engine_tests.cpp main.cpp scene_core.h scene_tools.h engine_version.h $(filter-out main.o,$(OBJS))
-	$(CXX) $(CXXFLAGS) tests/engine_tests.cpp $(filter-out main.o,$(OBJS)) -o $@ $(LDFLAGS)
-
-extensions/audio/audio_backend.o: extensions/audio/audio_backend.c extensions/audio/audio_backend.h extensions/audio/miniaudio.h extensions/audio/stb_vorbis.c
-	$(CC) -std=c11 -Wall -Wextra -Werror -Wno-unused-function -O2 $(EXTRA_CXXFLAGS) -c $< -o $@
-
-tests/studio_audio_tests: tests/studio_audio_tests.c extensions/audio/audio_backend.o
-	$(CC) -std=c11 -Wall -Wextra -Werror -O2 $^ -lm -ldl -lpthread $(EXTRA_LDFLAGS) -o $@
-
-extensions/modeling/boolean_adapter.o: extensions/modeling/boolean_adapter.cpp extensions/modeling/boolean_adapter.h build/deps/manifold-linux/src/libmanifold.a
-	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Ibuild/deps/manifold/include -Ibuild/deps/manifold-linux/include $(EXTRA_CXXFLAGS) -c $< -o $@
-
-build/deps/manifold-linux/src/libmanifold.a:
-	bash tools/prepare_modeling.sh
-
-tests/modeling_tests: tests/modeling_tests.cpp mesh_modeling.h studio_mesh_types.h extensions/modeling/boolean_adapter.o
-	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $(EXTRA_CXXFLAGS) $< extensions/modeling/boolean_adapter.o build/deps/manifold-linux/src/libmanifold.a -lpthread $(EXTRA_LDFLAGS) -o $@
+build/deps/manifold-windows/src/libmanifold.a:
+	bash tools/prepare_modeling.sh windows
 
 $(BUILD_DIR)/modeling_tests.exe: tests/modeling_tests.cpp mesh_modeling.h studio_mesh_types.h $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o
 	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o build/deps/manifold-windows/src/libmanifold.a $(LDFLAGS) -o $@
