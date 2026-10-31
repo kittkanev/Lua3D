@@ -13,5 +13,9 @@ int main(){
     auto subdivided=mesh;Model::Subdivide(subdivided,1);assert(subdivided.Faces.size()==48);Model::Check(subdivided);
     bool failed=false;try{GameObject plane("Plane",MeshType::Plane);Model::Boolean(original,plane,0);}catch(const std::exception&){failed=true;}assert(failed);
     failed=false;try{auto invalid=mesh;invalid.Faces[0][0]=99999;Model::Check(invalid);}catch(const std::exception&){failed=true;}assert(failed);
+    auto materialMesh=mesh;materialMesh.FaceMaterials.assign(materialMesh.Faces.size(),1);Model::Subdivide(materialMesh,1);assert(materialMesh.FaceMaterials.size()==materialMesh.Faces.size());for(auto material:materialMesh.FaceMaterials)assert(material==1);
+    auto duplicate=mesh;uint32_t last=uint32_t(duplicate.Positions.size()/3);auto point=Model::Point(duplicate,0);duplicate.Positions.insert(duplicate.Positions.end(),{point.x,point.y,point.z});for(auto& v:duplicate.Faces[0])if(v==0)v=last;Model::Weld(duplicate,{0,last},.001f);assert(duplicate.Positions.size()==mesh.Positions.size());
+    GameObject reflected=original;reflected.Scale[0]=-1;assert(std::abs(Volume(Model::Boolean(reflected,other,2))-.5)<1e-5);
+    auto rejected=original;StudioModifier invalid;invalid.Count=-1;failed=false;try{Model::AddModifier(rejected,invalid);}catch(const std::exception&){failed=true;}assert(failed&&rejected.Modifiers.empty()&&rejected.Vertices==original.Vertices);
     std::cout<<"PASS: polygon topology, modifier base preservation, closed bevel, extrude, Loop subdivision, CSG volumes and invalid input\n";
 }

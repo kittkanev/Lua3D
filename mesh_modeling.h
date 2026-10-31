@@ -312,11 +312,19 @@ inline void Subdivide(StudioMesh &m, int levels) {
       next.Positions[v * 3 + 1] = p.y;
       next.Positions[v * 3 + 2] = p.z;
     }
+    std::vector<uint32_t> triangleMaterials;
+    if (!m.FaceMaterials.empty())
+      for (size_t fi = 0; fi < m.Faces.size(); ++fi)
+        for (size_t t = 0; t + 2 < m.Faces[fi].size(); ++t)
+          triangleMaterials.push_back(m.FaceMaterials[fi]);
     for (size_t i = 0; i < m.Indices.size(); i += 3) {
       auto a = m.Indices[i], b = m.Indices[i + 1], c = m.Indices[i + 2],
            ab = mids[Edge(a, b)], bc = mids[Edge(b, c)], ca = mids[Edge(c, a)];
       next.Faces.insert(next.Faces.end(),
                         {{a, ab, ca}, {ab, b, bc}, {ca, bc, c}, {ab, bc, ca}});
+      if (!triangleMaterials.empty())
+        next.FaceMaterials.insert(next.FaceMaterials.end(), 4,
+                                  triangleMaterials[i / 3]);
     }
     m = std::move(next);
     Triangulate(m);
@@ -329,6 +337,7 @@ inline void Bevel(StudioMesh &m, float width) {
   StudioMesh out;
   std::map<uint64_t, std::array<uint32_t, 4>> sides;
   std::map<uint32_t, std::map<uint32_t, uint32_t>> caps;
+  size_t faceIndex = 0;
   for (const auto &f : m.Faces) {
     std::vector<uint32_t> inset;
     for (size_t i = 0; i < f.size(); ++i) {
@@ -343,6 +352,9 @@ inline void Bevel(StudioMesh &m, float width) {
           out, m, f[i], Add(p, Mul(Add(Mul(a, 1 / la), Mul(b, 1 / lb)), w))));
     }
     out.Faces.push_back(inset);
+    if (!m.FaceMaterials.empty())
+      out.FaceMaterials.push_back(m.FaceMaterials[faceIndex]);
+    ++faceIndex;
     for (size_t i = 0; i < f.size(); ++i) {
       size_t j = (i + 1) % f.size();
       uint32_t a = f[i], b = f[j], ia = inset[i], ib = inset[j];
@@ -356,6 +368,8 @@ inline void Bevel(StudioMesh &m, float width) {
           throw std::runtime_error(
               "Bevel needs consistently oriented manifold mesh");
         out.Faces.push_back({ib, ia, s[3], s[2]});
+        if (!m.FaceMaterials.empty())
+          out.FaceMaterials.push_back(0);
         caps[a][s[3]] = ia;
         caps[b][ib] = s[2];
         sides.erase(it);
@@ -378,15 +392,70 @@ inline void Bevel(StudioMesh &m, float width) {
       v = it->second;
     } while (v != start);
     out.Faces.push_back(cap);
+    if (!m.FaceMaterials.empty())
+      out.FaceMaterials.push_back(0);
   }
   m = std::move(out);
   Check(m);
   Triangulate(m);
 }
+inline void ValidateModifier(const StudioModifier &mod) {
+  if (int(mod.Type) < 0 || int(mod.Type) > 3 || mod.Axis < 0 || mod.Axis > 2 ||
+      mod.Count < 2 || mod.Count > 64 || mod.Levels < 1 || mod.Levels > 4 ||
+      !std::isfinite(mod.Amount) || mod.Amount < .00001f || mod.Amount > 1000)
+    throw std::runtime_error("Invalid modifier parameters");
+  for (float v : mod.Offset)
+    if (!std::isfinite(v) || std::abs(v) > 1000000)
+      throw std::runtime_error("Invalid modifier offset");
+}
+inline void Compact(StudioMesh &m) {
+  std::set<uint32_t> used;
+  for (const auto &f : m.Faces)
+    used.insert(f.begin(), f.end());
+  StudioMesh out;
+  out.FaceMaterials = m.FaceMaterials;
+  std::map<uint32_t, uint32_t> map;
+  for (auto v : used)
+    map[v] = AppendVertex(out, m, v, Point(m, v));
+  for (auto f : m.Faces) {
+    for (auto &v : f)
+      v = map.at(v);
+    out.Faces.push_back(std::move(f));
+  }
+  for (auto e : m.Seams) {
+    auto a = uint32_t(e >> 32), b = uint32_t(e);
+    if (map.count(a) && map.count(b))
+      out.Seams.push_back(Edge(map[a], map[b]));
+  }
+  Check(out);
+  Triangulate(out);
+  m = std::move(out);
+}
+inline void DeleteEdges(StudioMesh &m, const std::set<uint64_t> &edges) {
+  StudioMesh out = m;
+  out.Faces.clear();
+  out.FaceMaterials.clear();
+  for (size_t i = 0; i < m.Faces.size(); ++i) {
+    const auto &f = m.Faces[i];
+    bool remove = false;
+    for (size_t j = 0; j < f.size(); ++j)
+      remove = remove || edges.count(Edge(f[j], f[(j + 1) % f.size()]));
+    if (!remove) {
+      out.Faces.push_back(f);
+      if (!m.FaceMaterials.empty())
+        out.FaceMaterials.push_back(m.FaceMaterials[i]);
+    }
+  }
+  if (out.Faces.empty())
+    throw std::runtime_error("Operation would remove every face");
+  Compact(out);
+  m = std::move(out);
+}
 inline void Evaluate(GameObject &o) {
   StudioMesh m = o.Modifiers.empty() ? FromObject(o) : o.BaseMesh;
   Check(m);
-  for (const auto &mod : o.Modifiers)
+  for (const auto &mod : o.Modifiers) {
+    ValidateModifier(mod);
     if (mod.Enabled) {
       if (mod.Type == StudioModifier::Mirror ||
           mod.Type == StudioModifier::Array)
@@ -396,16 +465,20 @@ inline void Evaluate(GameObject &o) {
       else
         Bevel(m, mod.Amount);
     }
+  }
   Triangulate(m);
   ToObject(o, m);
 }
 inline void AddModifier(GameObject &o, const StudioModifier &mod) {
+  ValidateModifier(mod);
   if (o.Modifiers.size() >= 16)
     throw std::runtime_error("At most 16 modifiers");
-  if (o.Modifiers.empty())
-    o.BaseMesh = FromObject(o);
-  o.Modifiers.push_back(mod);
-  Evaluate(o);
+  GameObject edited = o;
+  if (edited.Modifiers.empty())
+    edited.BaseMesh = FromObject(edited);
+  edited.Modifiers.push_back(mod);
+  Evaluate(edited);
+  o = std::move(edited);
 }
 inline void ApplyModifiers(GameObject &o) {
   o.Modifiers.clear();
@@ -452,34 +525,40 @@ inline void Extrude(StudioMesh &m, const std::set<uint32_t> &selection,
     const auto &f = m.Faces[fi];
     for (size_t j = 0; j < f.size(); ++j) {
       uint32_t a = f[j], b = f[(j + 1) % f.size()];
-      if (counts[Edge(a, b)] == 1)
+      if (counts[Edge(a, b)] == 1) {
         out.Faces.push_back({a, b, extruded[b], extruded[a]});
+        if (!m.FaceMaterials.empty())
+          out.FaceMaterials.push_back(m.FaceMaterials[fi]);
+      }
     }
     for (auto &v : out.Faces[fi])
       v = extruded[v];
   }
-  out.FaceMaterials.clear();
   out.Seams.clear();
-  Triangulate(out);
+  Compact(out);
   m = std::move(out);
 }
 inline void DeleteElements(StudioMesh &m, const std::set<uint32_t> &selected,
                            int mode) {
   std::vector<std::vector<uint32_t>> faces;
+  std::vector<uint32_t> materials;
   for (size_t i = 0; i < m.Faces.size(); ++i) {
     bool remove = mode == 2 && selected.count(uint32_t(i));
     if (mode != 2)
       for (auto v : m.Faces[i])
         remove = remove || selected.count(v);
-    if (!remove)
+    if (!remove) {
       faces.push_back(m.Faces[i]);
+      if (!m.FaceMaterials.empty())
+        materials.push_back(m.FaceMaterials[i]);
+    }
   }
   if (faces.empty())
     throw std::runtime_error("Operation would remove every face");
   m.Faces = std::move(faces);
-  m.FaceMaterials.clear();
+  m.FaceMaterials = std::move(materials);
   m.Seams.clear();
-  Triangulate(m);
+  Compact(m);
 }
 inline void Weld(StudioMesh &m, const std::set<uint32_t> &selected,
                  float tolerance) {
@@ -501,6 +580,8 @@ inline void Weld(StudioMesh &m, const std::set<uint32_t> &selected,
       }
   }
   std::vector<std::vector<uint32_t>> faces;
+  std::vector<uint32_t> materials;
+  size_t faceIndex = 0;
   for (auto f : m.Faces) {
     for (auto &v : f)
       if (remap.count(v))
@@ -512,15 +593,19 @@ inline void Weld(StudioMesh &m, const std::set<uint32_t> &selected,
     if (clean.size() > 1 && clean.front() == clean.back())
       clean.pop_back();
     std::set<uint32_t> unique(clean.begin(), clean.end());
-    if (unique.size() >= 3 && unique.size() == clean.size())
+    if (unique.size() >= 3 && unique.size() == clean.size()) {
       faces.push_back(clean);
+      if (!m.FaceMaterials.empty())
+        materials.push_back(m.FaceMaterials[faceIndex]);
+    }
+    ++faceIndex;
   }
   if (faces.empty())
     throw std::runtime_error("Weld would collapse the mesh");
   m.Faces = std::move(faces);
-  m.FaceMaterials.clear();
+  m.FaceMaterials = std::move(materials);
   m.Seams.clear();
-  Triangulate(m);
+  Compact(m);
 }
 inline GameObject Boolean(const GameObject &a, const GameObject &b, int op) {
   StudioMesh ma = FromObject(a), mb = FromObject(b);
@@ -544,6 +629,12 @@ inline GameObject Boolean(const GameObject &a, const GameObject &b, int op) {
   }
   StudioMesh result;
   std::string error;
+  if (double(a.Scale[0]) * a.Scale[1] * a.Scale[2] < 0)
+    for (size_t i = 0; i < ma.Indices.size(); i += 3)
+      std::swap(ma.Indices[i + 1], ma.Indices[i + 2]);
+  if (double(b.Scale[0]) * b.Scale[1] * b.Scale[2] < 0)
+    for (size_t i = 0; i < mb.Indices.size(); i += 3)
+      std::swap(mb.Indices[i + 1], mb.Indices[i + 2]);
   if (!StudioBooleanMesh(ma.Positions, ma.Indices, mb.Positions, mb.Indices, op,
                          result.Positions, result.Indices, error))
     throw std::runtime_error(error);

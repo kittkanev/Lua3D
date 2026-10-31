@@ -40,6 +40,7 @@ static void CreateSampleGame() {
   GameObject floor("Textured Floor");
   auto mesh = Model::FromObject(floor);
   Model::Unwrap(mesh);
+  for(float& uv:mesh.UV)uv*=4;
   Model::ToObject(floor, mesh);
   floor.Scale[0] = 18;
   floor.Scale[1] = .5f;
