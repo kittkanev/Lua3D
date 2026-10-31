@@ -3,9 +3,9 @@
   <br/><strong>LUNORYX STUDIO</strong>
 </p>
 
-**1.0.0-rc.1 — кандидат первого стабильного выпуска.** Создавай 3D-сцены, редактируй модели, пиши Lua и собирай игру в один EXE. Сохранены прежняя тема Studio, докинг, Explorer, Properties, Tools и вкладки кода.
+**1.0.0 — первый стабильный выпуск.** Создавай 3D-сцены, редактируй модели, пиши Lua и собирай игру в один EXE. Сохранены прежняя тема Studio, докинг, Explorer, Properties, Tools и вкладки кода.
 
-[Скачать Lunoryx.exe](https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0-rc.1/Lunoryx.exe) · [Все файлы и визуальный отчёт](https://github.com/kittkanev/Lunoryx/releases/tag/v1.0.0-rc.1) · [Сообщить об ошибке](https://github.com/kittkanev/Lunoryx/issues)
+[Скачать Lunoryx.exe](https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0/Lunoryx.exe) · [Все файлы и визуальный отчёт](https://github.com/kittkanev/Lunoryx/releases/tag/v1.0.0) · [Сообщить об ошибке](https://github.com/kittkanev/Lunoryx/issues)
 
 Нужны Windows x64 и OpenGL 2.1 compatibility с framebuffer objects. Редактор работает без отдельной SDL/Lua/audio DLL и без окна консоли. ZIP добавляет примеры, инструкции и лицензии. `GemTrail.exe` в релизе — самостоятельный игровой пример.
 
@@ -23,7 +23,7 @@
 | Проекты | Schema 2 с чтением schema 1, атомарное сохранение, Save As, защита несохранённых изменений, история операций |
 | Автоматизация | MCP stdio: сцена, стабильные ID, проекты, GLB, Lua, аудио и моделирование |
 
-<img src="https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0-rc.1/uv.png" alt="Работающий UV-редактор Lunoryx" width="900" />
+<img src="https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0/uv.png" alt="Работающий UV-редактор Lunoryx" width="900" />
 
 ## Первая игра
 
@@ -36,7 +36,7 @@
 
 Для собственного проекта выбери стартовый скрипт и объект камеры. По умолчанию стартовый скрипт не назначен. В сборку входят ресурсы, импортированные в проект; произвольные обращения Lua к файлам и процессам не упаковываются автоматически.
 
-<img src="https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0-rc.1/game-windows.png" alt="Автоматически пройденный уровень в Windows" width="900" />
+<img src="https://github.com/kittkanev/Lunoryx/releases/download/v1.0.0/game-windows.png" alt="Автоматически пройденный уровень в Windows" width="900" />
 
 ## Работа в редакторе
 
