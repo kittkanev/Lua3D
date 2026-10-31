@@ -1,4 +1,4 @@
-LUNORYX STUDIO 0.2.0-alpha.1 — РАННЯЯ ТЕСТОВАЯ ВЕРСИЯ
+LUNORYX STUDIO 0.2.1-alpha.1 — РАННЯЯ ТЕСТОВАЯ ВЕРСИЯ
 
 Возможны баги, нестабильная работа и потеря несохранённых изменений.
 Сохраняйте проекты и резервные копии. Это не стабильная production-версия.
@@ -24,3 +24,10 @@ Export GLB — отдельный экспорт геометрии и мате�
 
 EARLY TEST RELEASE: bugs and instability are possible. Back up important files.
 Standalone Windows x64 GUI executable; no SDL2.dll or console window required.
+
+ДОПОЛНЕНИЯ 0.2.1
+Восстановлена основа и интерфейс v0.2. Переработка v0.3 отменена.
+Scene: Q/W/E/R — Select/Move/Rotate/Scale. Тяните манипуляторы мышью.
+Edit: Undo/Redo объектов. Settings: камера, большая сетка, snapping, звук.
+Audio: импорт WAV/MP3/FLAC/OGG/W64/RF64 по пути или перетаскиванием файла.
+MCP: Lunoryx.exe --mcp. Конфигурация и точный список функций — в README.

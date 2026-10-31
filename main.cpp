@@ -28,8 +28,13 @@ extern "C" {
 #include "scene_tools.h"
 #include "file_output.h"
 #include "engine_version.h"
+#include "editor_transform.h"
+#include "extensions/ImGuizmo/ImGuizmo.h"
 #include <limits>
 #include <exception>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 static const size_t MAX_CONSOLE_LINES = 500;
 
 // Global state
@@ -58,13 +63,18 @@ static void ApplySkyPreset(int preset) {
     if(preset<0||preset>2)return;
     g_SkyPreset=preset;std::copy(top[preset],top[preset]+3,g_SkyTop);std::copy(bottom[preset],bottom[preset]+3,g_SkyBottom);
 }
+static void AppendConsole(const std::string& msg);
+#include "studio_sounds.h"
+
 static void StartSimulation() {
-    if(!g_PhysicsRunning)g_PlaySnapshot=g_Objects;
+    if(!g_PhysicsRunning){g_PlaySnapshot=g_Objects;g_PlaySoundSnapshot=g_Sounds;}
+    for(const auto& sound:g_Sounds)if(sound.Autoplay)PlayStudioSound(sound);
     g_Physics.Accumulator=0;g_PhysicsRunning=true;g_SimulationRunning=true;
 }
 static void StopSimulation() {
-    if(g_PhysicsRunning)g_Objects=g_PlaySnapshot;
+    if(g_PhysicsRunning){g_Objects=g_PlaySnapshot;for(const auto& sound:g_Sounds)studio_audio_unload(sound.Id);g_Sounds=g_PlaySoundSnapshot;g_SelectedSound=-1;}
     g_PhysicsRunning=false;g_SimulationRunning=false;g_Physics.Accumulator=0;g_SelectedObjectIndex=-1;
+    studio_audio_stop_all();
 }
 
 char g_ScriptBuffer[1024 * 16] =
@@ -124,6 +134,9 @@ static void AppendConsole(const std::string& msg) {
     }
     g_ConsoleScrollToBottom = true;
 }
+
+#include "editor_preferences.h"
+static StudioObjectHistory g_ObjectHistory;
 
 static void ClearConsole() {
     g_ConsoleLines.clear();
@@ -558,6 +571,7 @@ static void InitLuaState() {
     lua_register(g_LuaState, "get_object_count", LuaBinding<l_get_object_count>);
     lua_register(g_LuaState, "get_time",         LuaBinding<l_get_time>);
     lua_register(g_LuaState, "export_glb",       LuaBinding<l_export_glb>);
+    RegisterSoundBindings(g_LuaState);
 }
 
 static void ShutdownLuaState() {
@@ -800,20 +814,15 @@ static void RenderAxesGizmo(float length = 1.2f) {
     glLineWidth(1.0f);
 }
 
-static void RenderGrid() {
+static void RenderGrid(float distance,const float target[3]) {
+    StudioGridPlan plan=StudioPlanGrid(distance,target[0],target[2],g_Preferences.GridStep,g_Preferences.AdaptiveGrid);
     glBegin(GL_LINES);
-    for (int i = -10; i <= 10; ++i) {
-        if (i == 0) {
-            glColor3f(0.45f, 0.45f, 0.48f);
-        } else {
-            glColor3f(0.26f, 0.26f, 0.28f);
-        }
-        glVertex3f((float)i, 0.0f, -10.0f);
-        glVertex3f((float)i, 0.0f, 10.0f);
-        glVertex3f(-10.0f, 0.0f, (float)i);
-        glVertex3f(10.0f, 0.0f, (float)i);
-    }
-    glEnd();
+    for(int level=0;level<6;++level){float step=plan.Step*std::pow(10.0f,float(level)),extent=step*plan.Lines;
+        float cx=std::floor(target[0]/step)*step,cz=std::floor(target[2]/step)*step;
+        for(int i=-plan.Lines;i<=plan.Lines;++i){float x=cx+i*step,z=cz+i*step;float shade=i%10==0?.34f:.23f;glColor3f(shade,shade,shade+.025f);
+            glVertex3f(x,0,cz-extent);glVertex3f(x,0,cz+extent);glVertex3f(cx-extent,0,z);glVertex3f(cx+extent,0,z);}
+        if(extent>g_Preferences.FarClip*2)break;
+    }glEnd();
 }
 
 static int ExportAccessor(tinygltf::Model& model,const void* data,size_t bytes,size_t count,int component,int type,int target,const std::vector<double>& lo={},const std::vector<double>& hi={}) {
@@ -865,11 +874,14 @@ static bool ExportGLB(const std::string& filename) {
     return std::fclose(file.release())==0&&result;
 }
 
+#include "editor_audio.h"
 #include "editor_ui.h"
+#include "studio_mcp.h"
+#include "tests/gizmo_smoke.h"
 #include "assets/logo_data.h"
 
 int main(int argc, char* argv[]) {
-    (void)argc; (void)argv;
+    if(argc>1&&std::strcmp(argv[1],"--mcp")==0)return RunStudioMcp();
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx - SDL initialization failed",SDL_GetError(),nullptr);
@@ -939,9 +951,11 @@ int main(int argc, char* argv[]) {
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,logoWidth,logoHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,logo);glBindTexture(GL_TEXTURE_2D,0);stbi_image_free(logo);
     }
+    char* preferenceDirectory=SDL_GetPrefPath("Lunoryx","Studio-v02");if(preferenceDirectory){g_PreferencesPath=std::string(preferenceDirectory)+"settings.json";SDL_free(preferenceDirectory);}LoadEditorPreferences();SDL_GL_SetSwapInterval(g_Preferences.VSync?1:0);if(g_Preferences.Theme==1)ImGui::StyleColorsLight();
     InitializeStudio();
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
+    g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);
 
     const Uint32 start_time = SDL_GetTicks();
     const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
@@ -955,6 +969,7 @@ int main(int argc, char* argv[]) {
     float cameraAngleY = -35.0f;
     float cameraTarget[3] = {0.0f, 1.0f, 0.0f};
 
+    GizmoSmokeTest gizmoSmoke;gizmoSmoke.Enabled=std::getenv("LUNORYX_GIZMO_SMOKE")!=nullptr;gizmoSmoke.Initialize();
     Uint32 lastTicks = SDL_GetTicks();
 
     while (!done) {
@@ -983,6 +998,7 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
                 done = true;
 
+            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")LoadStudioProject(path);else ImportStudioSound(path);}
             if(event.type==SDL_KEYDOWN&&!event.key.repeat) {
                 if(event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
                 if(event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
@@ -990,17 +1006,22 @@ int main(int argc, char* argv[]) {
             }
             int mouseX=0,mouseY=0;SDL_GetMouseState(&mouseX,&mouseY);
             if (SceneContains(float(mouseX),float(mouseY))) {
+                if(event.type==SDL_KEYDOWN&&!event.key.repeat&&!io.WantTextInput&&!g_PhysicsRunning){
+                    if(event.key.keysym.mod&KMOD_CTRL){if(event.key.keysym.sym==SDLK_z&&g_ObjectHistory.Undo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}if(event.key.keysym.sym==SDLK_y&&g_ObjectHistory.Redo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
+                    else if(!(SDL_GetMouseState(nullptr,nullptr)&SDL_BUTTON_RMASK)) {SDL_Keycode key=event.key.keysym.sym;if(key==SDLK_q)g_Studio.TransformMode=0;if(key==SDLK_w)g_Studio.TransformMode=1;if(key==SDLK_e)g_Studio.TransformMode=2;if(key==SDLK_r)g_Studio.TransformMode=3;if(key==SDLK_q||key==SDLK_w||key==SDLK_e||key==SDLK_r)g_Studio.SculptEnabled=false;}
+                }
+
                 if (event.type == SDL_MOUSEWHEEL) {
-                    cameraDistance -= event.wheel.y * 0.8f;
-                    cameraDistance = std::max(1.5f, std::min(50.0f, cameraDistance));
+                    cameraDistance *= std::pow(.85f,event.wheel.y*g_Preferences.ZoomSensitivity/.8f);
+                    cameraDistance = std::max(.2f, std::min(g_Preferences.FarClip*.25f, cameraDistance));
                 } else if (event.type == SDL_MOUSEMOTION) {
                     if (event.motion.state & SDL_BUTTON_RMASK) {
-                        cameraAngleY = WrapYaw(cameraAngleY + event.motion.xrel * 0.4f);
-                        cameraAngleX += event.motion.yrel * 0.4f;
+                        cameraAngleY = WrapYaw(cameraAngleY + event.motion.xrel * g_Preferences.OrbitSensitivity);
+                        cameraAngleX += event.motion.yrel * g_Preferences.OrbitSensitivity;
                         cameraAngleX = std::max(-89.0f, std::min(89.0f, cameraAngleX));
                     } else if (event.motion.state & SDL_BUTTON_MMASK) {
-                        cameraTarget[0] -= event.motion.xrel * 0.02f;
-                        cameraTarget[1] += event.motion.yrel * 0.02f;
+                        cameraTarget[0] -= event.motion.xrel * g_Preferences.PanSensitivity*cameraDistance/10;
+                        cameraTarget[1] += event.motion.yrel * g_Preferences.PanSensitivity*cameraDistance/10;
                     }
                 }
             }
@@ -1024,7 +1045,9 @@ int main(int argc, char* argv[]) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
+        gizmoSmoke.Input(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget);
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
 
         // Transparent DockSpace Setup (PassthruCentralNode + NoBackground so 3D scene is visible)
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1082,6 +1105,11 @@ int main(int argc, char* argv[]) {
         ImGui::End();
 
         RenderStudio(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget,dt);
+        gizmoSmoke.Check();if(gizmoSmoke.Done)done=true;
+        RenderStudioAudio();
+        Vec3 listener=CameraVector({0,0,cameraDistance},cameraAngleX,cameraAngleY);float listenerPosition[3]={listener.x+cameraTarget[0],listener.y+cameraTarget[1],listener.z+cameraTarget[2]};studio_audio_listener(listenerPosition,g_Preferences.MasterVolume);
+        if(!g_PhysicsRunning&&!ImGui::IsAnyItemActive()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(ImGuiMouseButton_Left))g_ObjectHistory.Capture(g_Objects);
+
 
         // Rendering
         ImGui::Render();
@@ -1109,9 +1137,9 @@ int main(int argc, char* argv[]) {
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         float aspect = float(sceneWidth) / float(sceneHeight);
-        float fov = 45.0f * PI / 180.0f;
+        float fov = g_Preferences.Fov * PI / 180.0f;
         float zNear = 0.1f;
-        float zFar = 200.0f;
+        float zFar = g_Preferences.FarClip;
         float f = 1.0f / std::tan(fov / 2.0f);
         float proj[16] = {
             f / aspect, 0, 0, 0,
@@ -1130,7 +1158,7 @@ int main(int argc, char* argv[]) {
         glTranslatef(-cameraTarget[0], -cameraTarget[1], -cameraTarget[2]);
 
         if (g_ShowGrid) {
-            RenderGrid();
+            RenderGrid(cameraDistance,cameraTarget);
         }
         if (g_ShowAxes) {
             RenderAxesGizmo(1.5f);
@@ -1195,7 +1223,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    SaveEditorPreferences();
     ShutdownLuaState();
+    studio_audio_shutdown();
     if(g_LogoTexture)glDeleteTextures(1,&g_LogoTexture);
     g_ViewportTarget.Destroy();
     ImGui_ImplOpenGL3_Shutdown();
@@ -1206,5 +1236,5 @@ int main(int argc, char* argv[]) {
     SDL_DestroyWindow(window);
     SDL_Quit();
 
-    return 0;
+    return gizmoSmoke.Enabled&&!gizmoSmoke.Passed?1:0;
 }

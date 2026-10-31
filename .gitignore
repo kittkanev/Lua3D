@@ -17,3 +17,8 @@ imgui.ini
 /tests/*.lunoryx
 /tests/*.lunoryx.tmp
 *.validation.json
+
+__pycache__/
+*.pyc
+
+/tests/studio_audio_tests

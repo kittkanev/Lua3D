@@ -12,11 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y g++ make libsdl2-dev liblua5.4-dev libgl1-mesa-dev xvfb xauth
+        run: sudo apt-get update && sudo apt-get install -y g++ make libsdl2-dev liblua5.4-dev libgl1-mesa-dev libegl1-mesa-dev xvfb xauth ffmpeg
       - name: Test geometry and scene operations
         run: make test
       - name: Build editor and integration tests
         run: KEEP_TEST_GLB=1 make -j2 engine test-integration
+      - name: Test Studio MCP and audio codecs
+        run: python tools/test_studio_mcp.py ./engine && python tools/test_studio_audio.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -25,13 +27,17 @@ jobs:
       - name: Validate binary glTF independently
         run: npm ci --prefix tools --ignore-scripts && node tools/validate_glb.cjs tests/test-scene.glb
       - name: Smoke test editor and timeout
-        run: mkdir -p build && timeout 30s xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
+        run: |
+          mkdir -p build
+          timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=3 LUNORYX_UI_SMOKE=1 LUNORYX_CAPTURE_PATH=build/studio-smoke.png ./engine
+          timeout 30s env SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 TEST_TIMEOUT=8 LUNORYX_GIZMO_SMOKE=1 LUNORYX_CAPTURE_PATH=build/gizmo-smoke.png ./engine
       - uses: actions/upload-artifact@v4
         with:
           name: gltf-validation
           path: |
             tests/test-scene.glb.validation.json
             build/studio-smoke.png
+            build/gizmo-smoke.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
@@ -64,6 +70,7 @@ jobs:
     needs: mingw
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: lua3d-windows-x64
@@ -74,4 +81,6 @@ jobs:
           & ./core_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./engine_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/test_studio_mcp.py ./engine.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

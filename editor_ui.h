@@ -17,6 +17,8 @@ struct StudioState {
     int ActiveScript=0,RequestDocument=-2,RequestTool=-1,BrushMode=0;
     float BrushRadius=.4f,BrushStrength=.1f;
     float Snap=.5f;
+    int TransformMode=1;
+    bool LocalTransform=false,TransformSnap=false,TransformDragging=false;
     ImVec2 SceneMin={0,0},SceneSize={1,1};
     Vec3 BrushWorld={0,0,0};
     CharacterConfig Character;
@@ -69,6 +71,14 @@ static void BuildStudioLayout(ImGuiID dockspace,const ImGuiViewport* viewport) {
     ImGui::DockBuilderFinish(dockspace);
 }
 static void StudioMenu() {
+    if(ImGui::BeginMenu("Edit")) {
+        ImGui::BeginDisabled(g_PhysicsRunning);
+        if(ImGui::MenuItem("Undo objects","Ctrl+Z")){if(g_ObjectHistory.Undo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
+        if(ImGui::MenuItem("Redo objects","Ctrl+Y")){if(g_ObjectHistory.Redo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
+        ImGui::EndDisabled();ImGui::EndMenu();
+    }
+    if(ImGui::MenuItem("Audio"))g_ShowAudio=true;
+    if(ImGui::MenuItem("Settings"))g_Preferences.ShowSettings=true;
     if(ImGui::BeginMenu("Window")) {
         ImGui::MenuItem("Explorer",nullptr,&g_Studio.ShowExplorer);
         ImGui::MenuItem("Properties",nullptr,&g_Studio.ShowProperties);
@@ -97,6 +107,8 @@ static Vec3 CameraVector(Vec3 v,float pitch,float yaw) {
     a=yaw*toRad;c=std::cos(a);s=std::sin(a);float x=c*v.x+s*v.z;
     v.z=-s*v.x+c*v.z;v.x=x;return v;
 }
+#include "editor_gizmo.h"
+
 static void SceneInteraction(float distance,float pitch,float yaw,const float target[3],float dt) {
     auto& io=ImGui::GetIO();
     if(!g_Studio.SceneHovered)return;
@@ -104,7 +116,7 @@ static void SceneInteraction(float distance,float pitch,float yaw,const float ta
     camera.x+=target[0];camera.y+=target[1];camera.z+=target[2];
     float nx=(io.MousePos.x-g_Studio.SceneMin.x)/g_Studio.SceneSize.x*2-1;
     float ny=1-(io.MousePos.y-g_Studio.SceneMin.y)/g_Studio.SceneSize.y*2;
-    float tangent=std::tan(45*PI/360),aspect=g_Studio.SceneSize.x/g_Studio.SceneSize.y;
+    float tangent=std::tan(g_Preferences.Fov*PI/360),aspect=g_Studio.SceneSize.x/g_Studio.SceneSize.y;
     Vec3 ray=CameraVector({nx*aspect*tangent,ny*tangent,-1},pitch,yaw);
     float length=float(std::sqrt(Dot(ray,ray)));ray.x/=length;ray.y/=length;ray.z/=length;
     if(g_Studio.SculptEnabled&&g_SelectedObjectIndex>=0&&size_t(g_SelectedObjectIndex)<g_Objects.size()&&!g_PhysicsRunning) {
@@ -120,7 +132,7 @@ static void SceneInteraction(float distance,float pitch,float yaw,const float ta
                 if(!SculptBrush(object,hit,g_Studio.BrushRadius,strength,g_Studio.BrushMode))AppendConsole("Sculpt rejected: invalid brush or geometry limit.\n");
             }
         }
-    } else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    } else if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&!ImGuizmo::IsOver()&&!ImGuizmo::IsUsing()) {
         int selected=-1;float nearest=10000;Vec3 hit;
         for(size_t i=0;i<g_Objects.size();++i)if(g_Objects[i].Visible&&RaycastObject(g_Objects[i],camera,ray,hit,nearest))selected=int(i);
         if(selected>=0)SelectObject(selected,io.KeyCtrl);
@@ -147,6 +159,9 @@ static void RenderWorkspace(float distance,float pitch,float yaw,const float tar
             ImGuiTabItemFlags sceneFlags=g_Studio.RequestDocument==-2?ImGuiTabItemFlags_SetSelected:0;
             if(ImGui::BeginTabItem("Scene",nullptr,sceneFlags)) {
                 if(g_Studio.RequestDocument==-2)g_Studio.RequestDocument=-1;
+                const char* modes[]={"Select (Q)","Move (W)","Rotate (E)","Scale (R)"};
+                for(int mode=0;mode<4;++mode){if(mode)ImGui::SameLine();if(ImGui::RadioButton(modes[mode],g_Studio.TransformMode==mode)){g_Studio.TransformMode=mode;g_Studio.SculptEnabled=false;}}
+                ImGui::SameLine();ImGui::Checkbox("Local",&g_Studio.LocalTransform);ImGui::SameLine();ImGui::Checkbox("Snap",&g_Studio.TransformSnap);
                 ImGui::TextDisabled(g_Studio.SculptEnabled?"SCULPT: LMB brush | Shift: invert | RMB orbit":"LMB select | Ctrl+click multi-select | RMB orbit | MMB pan | Wheel zoom");
                 g_Studio.SceneMin=ImGui::GetCursorScreenPos();g_Studio.SceneSize=ImGui::GetContentRegionAvail();
                 if(g_Studio.SceneSize.x<1) { g_Studio.SceneSize.x=1; }
@@ -154,6 +169,7 @@ static void RenderWorkspace(float distance,float pitch,float yaw,const float tar
                 g_Studio.SceneActive=true;
                 ImGui::Image(ImTextureID(g_ViewportTarget.Color),g_Studio.SceneSize,ImVec2(0,1),ImVec2(1,0));
                 g_Studio.SceneHovered=ImGui::IsItemHovered();
+                RenderTransformGizmo(distance,pitch,yaw,target);
                 SceneInteraction(distance,pitch,yaw,target,dt);
                 ImGui::EndTabItem();
             }
@@ -198,6 +214,7 @@ static void RenderExplorer() {
             if(ImGui::Button("New Script")) { NewScript(); }
             ImGui::TreePop();
         }
+        if(ImGui::Selectable("Sounds / Audio"))g_ShowAudio=true;
         if(ImGui::Selectable("Environment / Skybox")){g_Studio.ShowTools=true;g_Studio.RequestTool=3;}
         if(ImGui::Selectable("Documentation"))g_Studio.ShowDocs=true;
         ImGui::TextDisabled("Ctrl+click: multi-select");
@@ -350,6 +367,7 @@ static void RenderDocs() {
 }
 static void RenderStudio(float& distance,float& pitch,float& yaw,float target[3],float dt) {
     RenderWorkspace(distance,pitch,yaw,target,dt);
+    RenderEditorSettings();
     if(!g_Studio.FullscreenCode){RenderExplorer();RenderProperties(target);RenderTools(distance,pitch,yaw,target);RenderOutput();RenderDocs();}
 }
 static void RenderSky() {

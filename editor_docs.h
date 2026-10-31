@@ -1,9 +1,14 @@
 #pragma once
 #include "embedded_licenses.h"
+#include "extension_licenses.h"
 struct ApiTopic {const char* Title;const char* Text;};
 static const ApiTopic kApiTopics[]={
 {"Getting started",R"DOC(LUNORYX STUDIO
 Scene tab: orbit with RMB, pan with MMB, zoom with the wheel.
+Q/W/E/R: Select/Move/Rotate/Scale. Drag gizmo axes or planes to transform objects.
+Local and Snap are in the Scene toolbar; Edit offers object undo/redo (Ctrl+Z/Y).
+Settings stores camera, grid, snap, theme, VSync and master volume.
+Audio imports WAV/MP3/FLAC/OGG/W64/RF64; files can be dragged onto the window.
 Click to select. Ctrl+click selects multiple objects. Explorer shows objects and scripts.
 Tools > Build: spawn primitives, snap to grid, duplicate, join selected meshes.
 Tools > Sculpt: subdivide, choose a brush, then hold LMB on the selected mesh.
@@ -78,7 +83,8 @@ Vertex colors are preserved; the first source supplies metallic/roughness.
 Sources' scripts and custom properties are not merged.
 Sculpt subdivision limit: 4 passes per operation; 200,000 vertices per mesh.
 The selected brush operates in LOCAL coordinates and exports to GLB.
-Tools > Sculpt has Undo Last Stroke; this is not a global undo history.
+Tools > Sculpt has Undo Last Stroke. Edit > Undo/Redo also snapshots objects and meshes.
+Script text and audio are not part of object history.
 )DOC"},
 {"Editable properties",R"DOC(local i = find_object('Player')
 set_property(i, 'Health', 100)
@@ -106,5 +112,22 @@ It excludes Lua code, callbacks, custom properties, physics and the skybox.
 The viewport has simple directional shading; it is not a full PBR renderer.
 Paths must point to an existing writable folder. No directory is auto-created.
 )DOC"}
+,{"Audio and MCP",R"DOC(Audio: import a path in the Audio window or drop a supported audio file onto Studio.
+Formats: WAV/WAVE/W64/RF64, MP3, FLAC, OGG/OGA Vorbis. Audio properties and
+resource paths are saved in .lunoryx; retain the sound files with your project.
+local sound = add_sound('sound.ogg', 'Ambient') -- zero-based sound index
+play_sound(sound)
+stop_sound(sound)
+Audio window: volume, pitch, loop, autoplay, spatial position, preview/stop.
+
+MCP: start Lunoryx.exe --mcp from your MCP client (stdio transport).
+The process uses this original engine with a separate headless scene.
+Tools: scene_list, add_object, set_transform, remove_object, project_save,
+project_load, export_glb, run_lua, add_sound, undo_objects, redo_objects.
+Use stable object IDs returned by MCP; legacy Lua continues to use array indices.
+Save via project_save, then open the project in Studio. Loaded scripts do not run.
+run_lua executes TRUSTED Lua with standard libraries, as in the original editor.
+)DOC"}
+,{"Additional licenses",kExtensionLicenses}
 ,{"Third-party licenses",kEmbeddedLicenses}
 };

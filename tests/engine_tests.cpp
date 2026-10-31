@@ -149,6 +149,7 @@ int main() {
     ObjectProperty property;property.NumberValue=42;assert(SetProperty(g_Objects[0],"Health",property));
     g_Studio.Scripts[1].Allocated=true;g_Studio.Scripts[1].Open=false;std::snprintf(g_Studio.Scripts[1].Name,sizeof(g_Studio.Scripts[1].Name),"Closed.lua");
     auto savedName=g_Objects[0].Name;size_t savedCount=g_Objects.size();
+    StudioSound clip;clip.Name="Saved sound";clip.Path="tests/missing.wav";clip.Volume=.4f;clip.Loop=true;g_Sounds.push_back(clip);
     assert(SaveStudioProject("tests/test-project.lunoryx"));
     auto validPosition=g_Objects[0].Position[0];g_Objects[0].Position[0]=std::numeric_limits<float>::quiet_NaN();
     assert(!SaveStudioProject("tests/test-project.lunoryx"));g_Objects[0].Position[0]=validPosition;
@@ -156,6 +157,7 @@ int main() {
     g_Objects[0].Name="changed";
     assert(LoadStudioProject("tests/test-project.lunoryx"));
     assert(g_Objects.size()==savedCount&&g_Objects[0].Name==savedName);
+    assert(g_Sounds.size()==1&&g_Sounds[0].Name=="Saved sound"&&g_Sounds[0].Loop&&std::abs(g_Sounds[0].Volume-.4f)<1e-6f);
     assert(g_Objects[0].Properties.at("Health").NumberValue==42);
     assert(std::strstr(g_Studio.Scripts[0].Code,"explicit Run"));
     assert(g_Studio.Scripts[1].Allocated&&!g_Studio.Scripts[1].Open);
@@ -165,10 +167,13 @@ int main() {
     {std::ofstream broken("tests/broken-project.lunoryx");broken<<"{bad json";}
     assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects[0].Name==savedName);
     nlohmann::json corrupt;{std::ifstream f("tests/test-project.lunoryx");f>>corrupt;}
+    auto legacy=corrupt;legacy.erase("sounds");{std::ofstream f("tests/legacy-project.lunoryx");f<<legacy;}assert(LoadStudioProject("tests/legacy-project.lunoryx")&&g_Sounds.empty());std::remove("tests/legacy-project.lunoryx");
     corrupt["objects"].back()["indices"][0]=4294967295u;
     {std::ofstream broken("tests/broken-project.lunoryx");broken<<corrupt;}
     assert(!LoadStudioProject("tests/broken-project.lunoryx")&&g_Objects.size()==savedCount);
     std::remove("tests/test-project.lunoryx");std::remove("tests/broken-project.lunoryx");
+    g_PreferencesPath="tests/test-settings.json";g_Preferences.Fov=73;g_Preferences.OrbitSensitivity=.7f;assert(SaveEditorPreferences());g_Preferences.Fov=45;LoadEditorPreferences();assert(g_Preferences.Fov==73&&std::abs(g_Preferences.OrbitSensitivity-.7f)<1e-6f);
+    {std::ofstream invalid("tests/test-settings.json");invalid<<"{\"fov\":0}";}LoadEditorPreferences();assert(g_Preferences.Fov==73);std::remove("tests/test-settings.json");g_PreferencesPath.clear();g_Preferences=EditorPreferences();
     ShutdownLuaState();
     for (int run = 0; run < 50; ++run) {
         InitLuaState();

@@ -3,6 +3,35 @@
   <br/><strong>LUNORYX STUDIO</strong>
 </p>
 
+> **0.2.1-alpha.1: снова прежний Studio v0.2.** Переработка v0.3 отменена.
+> Сохранены старый интерфейс, докинг, вкладки и API. Добавлены проверяемые изменения
+> в существующий редактор: манипуляторы, сетка, настройки, звук и MCP.
+> [Изменения выпуска](docs/release-notes-v0.2.1-alpha.1.md).
+
+### Управление дополнениями 0.2.1
+
+- Scene: Q — выделение, W — Move, E — Rotate, R — Scale. Local/Snap рядом.
+  Тяните оси или плоскости манипулятора; Ctrl+click — мультивыбор.
+- Edit → Undo/Redo объектов, либо Ctrl+Z/Ctrl+Y в viewport. История объектов
+  сохраняет также геометрию и свойства; текст скриптов и звуки в эту историю не входят.
+- Settings: камера, FOV, clipping, сетка, snapping, VSync, тема, master volume.
+  Настройки сохраняются между запусками. Исходная тема и докинг остаются по умолчанию.
+- Audio: укажите путь или перетащите WAV/WAVE/W64/RF64, MP3, FLAC, OGG/OGA в окно.
+  Preview/Stop, volume, pitch, loop, autoplay, 3D position. Ресурсы хранятся по путям:
+  держите звуковые файлы с проектом. Lua: `add_sound(path,name)`, `play_sound(index)`,
+  `stop_sound(index)`. Индексы звуков — отдельные, с нуля.
+- MCP: `Lunoryx.exe --mcp`, stdio JSON-RPC. Сервер создаёт собственную headless-сцену
+  на прежнем движке; сохраните её в .lunoryx и откройте в редакторе.
+  Tools: scene_list, add_object, set_transform, remove_object, project_save/load,
+  export_glb, run_lua, add_sound, undo_objects, redo_objects. MCP обращается к
+  стабильным ID объектов; Lua сохраняет прежние индексы. Lua по-прежнему доверенный.
+
+```json
+{"mcpServers":{"lunoryx":{"command":"C:\\Tools\\Lunoryx.exe","args":["--mcp"]}}}
+```
+
+
+
 <p align="center">
   <a href="https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml"><img src="https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build and tests" /></a>
   <img src="https://img.shields.io/badge/C%2B%2B-11-608cff" alt="C++11" />
@@ -18,11 +47,11 @@
   <a href="#архитектура">Архитектура</a>
 </p>
 
-> **Ранняя тестовая версия · v0.2.0-alpha.1**
+> **Ранняя тестовая версия · v0.2.1-alpha.1**
 > Возможны баги, нестабильная работа и потеря несохранённых изменений.
 > Выпуск предназначен для знакомства и тестирования. Сохраняйте резервные копии важных файлов.
 >
-> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.0-alpha.1)** — самостоятельный `Lunoryx.exe`, без отдельной DLL и консоли.
+> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.1-alpha.1)** — самостоятельный `Lunoryx.exe`, без отдельной DLL и консоли.
 
 **Lunoryx** (ранее Lua3D) — небольшой настольный 3D-редактор на C++ с Lua 5.4, OpenGL и Dear ImGui.
 Сцена редактируется через инспектор или скрипт; `on_update(dt)` позволяет анимировать объекты без пересборки приложения.
@@ -52,8 +81,8 @@ make -j2
 
 ### Windows · готовая сборка
 
-Скачай **`Lunoryx-v0.2.0-alpha.1-windows-x64.zip`** со страницы
-[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.0-alpha.1).
+Скачай **`Lunoryx-v0.2.1-alpha.1-windows-x64.zip`** со страницы
+[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.1-alpha.1).
 Запусти **`Lunoryx.exe`** напрямую. Дополнительные DLL и файлы для работы не требуются; логотип, справка и лицензии встроены в приложение. ZIP добавляет примеры и текстовые инструкции.
 В архив включены пример Lua, инструкция и лицензии сторонних компонентов.
 

@@ -56,6 +56,13 @@ static bool SaveStudioProject(const std::string& path) {
             }
             root["objects"].push_back(std::move(j));
         }
+        root["sounds"]=nlohmann::json::array();
+        if(g_Sounds.size()>64)throw std::runtime_error("At most 64 sounds per project");
+        for(const auto& sound:g_Sounds){
+            if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos||!finiteRange(sound.Volume,0,2)||!finiteRange(sound.Pitch,.1f,4))throw std::runtime_error("Invalid sound settings");
+            for(float p:sound.Position)if(!std::isfinite(p))throw std::runtime_error("Invalid sound position");
+            root["sounds"].push_back({{"name",sound.Name},{"path",sound.Path},{"position",SaveVector(sound.Position)},{"volume",sound.Volume},{"pitch",sound.Pitch},{"loop",sound.Loop},{"spatial",sound.Spatial},{"autoplay",sound.Autoplay}});
+        }
         for(const auto& script:g_Studio.Scripts)if(script.Allocated)root["scripts"].push_back({{"name",script.Name},{"code",script.Code},{"open",script.Open}});
         const std::string document=root.dump(2);
         if(document.size()>32*1024*1024)throw std::runtime_error("Project exceeds 32 MiB limit");
@@ -111,10 +118,19 @@ static bool LoadStudioProject(const std::string& path) {
         float top[3],bottom[3];ReadVector(root.at("sky_top"),top,true);ReadVector(root.at("sky_bottom"),bottom,true);
         int preset=root.at("sky_preset").get<int>();if(preset<0||preset>2)throw std::runtime_error("Unknown sky preset");
         float gravity=ReadRange(root.at("gravity"),-30,0);bool ground=root.at("ground").get<bool>();
+        std::vector<StudioSound> sounds;
+        if(root.contains("sounds")){
+            const auto& savedSounds=root.at("sounds");if(!savedSounds.is_array()||savedSounds.size()>64)throw std::runtime_error("Invalid sound count");
+            for(const auto& j:savedSounds){StudioSound sound;sound.Name=j.at("name").get<std::string>();sound.Path=j.at("path").get<std::string>();
+                if(sound.Name.size()>255||sound.Path.size()>511||sound.Name.find('\0')!=std::string::npos||sound.Path.find('\0')!=std::string::npos)throw std::runtime_error("Invalid audio path or name");
+                ReadVector(j.at("position"),sound.Position);sound.Volume=ReadRange(j.at("volume"),0,2);sound.Pitch=ReadRange(j.at("pitch"),.1f,4);sound.Loop=j.at("loop").get<bool>();sound.Spatial=j.at("spatial").get<bool>();sound.Autoplay=j.at("autoplay").get<bool>();sounds.push_back(sound);}
+        }
         // Commit only after the complete document has passed validation. Never execute loaded scripts.
+        for(const auto& sound:g_Sounds){studio_audio_unload(sound.Id);}
+        g_Sounds.swap(sounds);g_SelectedSound=-1;
         g_Objects.swap(objects);g_Studio.Scripts.swap(*scripts);std::copy(top,top+3,g_SkyTop);std::copy(bottom,bottom+3,g_SkyBottom);g_SkyPreset=preset;
         g_Physics.Gravity=gravity;g_Physics.Ground=ground;g_Physics.Accumulator=0;g_PhysicsRunning=false;g_SimulationRunning=false;g_PlaySnapshot.clear();g_SelectedObjectIndex=-1;
-        g_Studio.RequestDocument=-2;g_Studio.ActiveScript=0;g_Studio.HasSculptUndo=false;
+        g_Studio.RequestDocument=-2;g_Studio.ActiveScript=0;g_Studio.HasSculptUndo=false;g_ObjectHistory.Clear();g_ObjectHistory.Capture(g_Objects);
         if(g_LuaState)ClearUpdateCallback(g_LuaState);
         AppendConsole("Loaded project without executing scripts: "+path+"\n");return true;
     } catch(const std::exception& error){AppendConsole(std::string("Project load failed: ")+error.what()+"\n");return false;}
