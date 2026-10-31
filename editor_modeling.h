@@ -23,7 +23,6 @@ struct ModifierDraft {
   StudioModifier Value;
 };
 static ModifierDraft g_ModifierDraft;
-static bool g_ModelBusy = false;
 static uint64_t g_ModelInputHash = 0;
 static void
 QueueModelJob(const std::function<void(std::vector<GameObject> &)> &operation) {
@@ -56,7 +55,7 @@ static void PollModelJob() {
     AppendConsole("Modeling: " + result.Error + "\n");
     return;
   }
-  if (StudioSceneFingerprint(g_Objects) != g_ModelInputHash) {
+  if (g_PhysicsRunning||StudioSceneFingerprint(g_Objects) != g_ModelInputHash) {
     AppendConsole("Modeling result discarded because the scene changed.\n");
     return;
   }

@@ -1028,7 +1028,7 @@ int main(int argc, char* argv[]) {
                 if(!g_PlayerMode&&event.key.keysym.sym==SDLK_s&&(event.key.keysym.mod&KMOD_CTRL))SaveCurrentProject();
                 if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
                 if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
-                if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
+                if(!g_PlayerMode&&!g_ModelBusy&&event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
             }
             int mouseX=0,mouseY=0;SDL_GetMouseState(&mouseX,&mouseY);
             if (SceneContains(float(mouseX),float(mouseY))) {

@@ -25,6 +25,7 @@ struct StudioState {
     std::array<ScriptDocument,8> Scripts;
 };
 static StudioState g_Studio;
+static bool g_ModelBusy=false;
 static bool g_ShowUV=false;
 static GameObject g_SculptUndo("Sculpt Undo");
 static GLuint g_LogoTexture=0;
@@ -98,10 +99,11 @@ static void StudioMenu() {
         if(ImGui::MenuItem("Delete Active Script")){g_Studio.Scripts[g_Studio.ActiveScript].Allocated=false;g_Studio.Scripts[g_Studio.ActiveScript].Open=false;}
         ImGui::EndMenu();
     }
+    ImGui::BeginDisabled(g_ModelBusy);
     if(ImGui::Button(g_PhysicsRunning?"Stop Simulation":"Play Simulation")) {
         if(g_PhysicsRunning)StopSimulation();else StartSimulation();
     }
-    ImGui::SameLine();
+    ImGui::EndDisabled();ImGui::SameLine();
 }
 static Vec3 CameraVector(Vec3 v,float pitch,float yaw) {
     const float toRad=-PI/180;

@@ -9,6 +9,7 @@ Candidate fixes:
 - Delete selected edges through their incident faces. Invalid modifier settings are rejected without changing the original stack.
 - Respect marked UV seams through chart constraints, preserve authored normals and retain seam markings across repeated unwrap.
 - Handle reflected transforms in boolean operands.
+- Prevent a background modeling result from mutating an active Play session; block Play while a mesh operation is pending.
 - Cache GPU textures and avoid allocating a mesh copy on each lit draw. History sampling follows completed input operations; embedded resources count toward its memory budget.
 - Refresh the README, first-run instructions and embedded API guide to describe the shipped behavior and explicit limits.
 
