@@ -8,8 +8,8 @@ sha256sum --check <<'HASHES'
 7d5ea1b9cb6aa0b59ca3dde1c6adcb57ef83a1ba8e5432c0ecd06bf439b3ad88  lua.tar.gz
 d44bd8cd869219f43634a898d7735d0c92d4b2cca129f709dc8b98402b36d5f3  sdl.tar.gz
 HASHES
-tar -xzf lua.tar.gz
-tar -xzf sdl.tar.gz
+tar --no-same-owner -xzf lua.tar.gz
+tar --no-same-owner -xzf sdl.tar.gz
 cd lua-5.4.6/src
 mkdir -p mingw-objects
 for source in *.c; do
