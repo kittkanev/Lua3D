@@ -4,6 +4,7 @@ struct CachedStudioTexture {
   std::string Error;
 };
 static std::map<std::string, CachedStudioTexture> g_TextureCache;
+static uint32_t g_TextureGeneration = 1;
 static std::string StudioTextureKey(const StudioMaterial &m) {
   if (m.Image.empty())
     return m.Texture;
@@ -15,10 +16,15 @@ static std::string StudioTextureKey(const StudioMaterial &m) {
 static GLuint StudioTexture(const StudioMaterial &material) {
   if (material.Texture.empty() && material.Image.empty())
     return 0;
+  if (material.TextureGeneration == g_TextureGeneration)
+    return material.CachedTexture;
   auto key = StudioTextureKey(material);
   auto found = g_TextureCache.find(key);
-  if (found != g_TextureCache.end())
+  if (found != g_TextureCache.end()) {
+    material.CachedTexture = found->second.Id;
+    material.TextureGeneration = g_TextureGeneration;
     return found->second.Id;
+  }
   CachedStudioTexture value;
   try {
     auto image = DecodeMaterialImage(material);
@@ -36,6 +42,8 @@ static GLuint StudioTexture(const StudioMaterial &material) {
     value.Error = e.what();
     AppendConsole(value.Error + "\n");
   }
+  material.CachedTexture = value.Id;
+  material.TextureGeneration = g_TextureGeneration;
   g_TextureCache[key] = value;
   return value.Id;
 }
@@ -44,11 +52,28 @@ static void ClearStudioTextures() {
     if (t.second.Id)
       glDeleteTextures(1, &t.second.Id);
   g_TextureCache.clear();
+  ++g_TextureGeneration;
 }
 static void RenderLitMesh(const GameObject &object) {
-  auto mesh = Model::FromObject(object);
-  if (mesh.Normals.size() != mesh.Positions.size())
-    Model::Triangulate(mesh);
+  static StudioMesh primitives[5];
+  const StudioMesh *primitive = nullptr;
+  if (object.Vertices.empty()) {
+    auto &mesh = primitives[int(object.Type)];
+    if (mesh.Positions.empty()) {
+      GameObject shape("Primitive", object.Type);
+      mesh = Model::FromObject(shape);
+      Model::Triangulate(mesh);
+    }
+    primitive = &mesh;
+  }
+  const auto &positions = primitive ? primitive->Positions : object.Vertices;
+  const auto &indices = primitive ? primitive->Indices : object.Indices;
+  const auto &normals = primitive ? primitive->Normals : object.Normals;
+  const auto &uv = primitive ? primitive->UV : object.UV;
+  const auto &colors = primitive ? primitive->Colors : object.VertexColors;
+  const auto &faces = primitive ? primitive->Faces : object.Faces;
+  const auto &materials =
+      primitive ? primitive->FaceMaterials : object.FaceMaterials;
   glEnable(GL_LIGHTING);
   glEnable(GL_LIGHT0);
   glEnable(GL_NORMALIZE);
@@ -59,13 +84,14 @@ static void RenderLitMesh(const GameObject &object) {
   glLightfv(GL_LIGHT0, GL_POSITION, light);
   glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
   glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
-  size_t triangle = 0;
-  for (size_t face = 0; face < mesh.Faces.size(); ++face) {
-    uint32_t slot = mesh.FaceMaterials.empty() ? 0 : mesh.FaceMaterials[face];
-    StudioMaterial fallback;
-    std::copy(object.Color, object.Color + 3, fallback.Color);
-    fallback.Metallic = object.Metallic;
-    fallback.Roughness = object.Roughness;
+  StudioMaterial fallback;
+  std::copy(object.Color, object.Color + 3, fallback.Color);
+  fallback.Metallic = object.Metallic;
+  fallback.Roughness = object.Roughness;
+  size_t triangle = 0,
+         faceCount = faces.empty() ? indices.size() / 3 : faces.size();
+  for (size_t face = 0; face < faceCount; ++face) {
+    uint32_t slot = materials.empty() ? 0 : materials[face];
     const auto &material =
         slot < object.Materials.size() ? object.Materials[slot] : fallback;
     GLuint texture = StudioTexture(material);
@@ -81,20 +107,35 @@ static void RenderLitMesh(const GameObject &object) {
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS,
                 std::max(1.f, (1 - material.Roughness) * 100));
     glBegin(GL_TRIANGLES);
-    for (size_t t = 0; t + 2 < mesh.Faces[face].size(); ++t, ++triangle)
+    size_t triangles = faces.empty() ? 1 : faces[face].size() - 2;
+    for (size_t t = 0; t < triangles; ++t, ++triangle) {
+      Vec3 normal = {0, 1, 0};
+      if (normals.size() != positions.size()) {
+        auto a = indices[triangle * 3] * 3, b = indices[triangle * 3 + 1] * 3,
+             c = indices[triangle * 3 + 2] * 3;
+        normal = Model::Unit(Cross(
+            {positions[b] - positions[a], positions[b + 1] - positions[a + 1],
+             positions[b + 2] - positions[a + 2]},
+            {positions[c] - positions[a], positions[c + 1] - positions[a + 1],
+             positions[c + 2] - positions[a + 2]}));
+      }
       for (int corner = 0; corner < 3; ++corner) {
-        uint32_t v = mesh.Indices[triangle * 3 + corner];
+        uint32_t v = indices[triangle * 3 + corner];
         float color[3];
         for (int k = 0; k < 3; ++k)
           color[k] = material.Color[k] *
                      (object.Materials.empty() ? 1 : object.Color[k]) *
-                     (mesh.Colors.empty() ? 1 : mesh.Colors[v * 3 + k]);
+                     (colors.empty() ? 1 : colors[v * 3 + k]);
         glColor3fv(color);
-        glNormal3fv(mesh.Normals.data() + v * 3);
-        if (!mesh.UV.empty())
-          glTexCoord2f(mesh.UV[v * 2], mesh.UV[v * 2 + 1]);
-        glVertex3fv(mesh.Positions.data() + v * 3);
+        if (normals.size() == positions.size())
+          glNormal3fv(normals.data() + v * 3);
+        else
+          glNormal3f(normal.x, normal.y, normal.z);
+        if (!uv.empty())
+          glTexCoord2f(uv[v * 2], uv[v * 2 + 1]);
+        glVertex3fv(positions.data() + v * 3);
       }
+    }
     glEnd();
   }
   glBindTexture(GL_TEXTURE_2D, 0);

@@ -201,5 +201,7 @@ int main() {
     assert(SaveStudioProject("tests/history.lunoryx")&&!ProjectDirty());
     g_Studio.Scripts[0].Allocated=true;std::strcpy(g_Studio.Scripts[0].Code,"-- changed");assert(ProjectDirty());
     assert(!LoadStudioProject("tests/does-not-exist.lunoryx")&&ProjectDirty());
+    CreateSampleGame();uint64_t editorHash=CompleteDocumentHash();StartSimulation();g_SkyTop[0]=.99f;g_Objects[0].Position[0]=123;g_GameScore=2;StopSimulation();assert(CompleteDocumentHash()==editorHash&&g_GameScore==0);
+    ShutdownLuaState();
     std::cout << "PASS: Lua bounds, stack recovery, hostile metamethods, GLB buffer round trip\n";
 }

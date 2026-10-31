@@ -6,6 +6,7 @@ struct StudioSnapshot {
   float Top[3], Bottom[3];
   int Sky;
   PhysicsState Physics;
+  StudioGameSettings Game;
   uint64_t Hash = 0;
 };
 inline uint64_t StudioDocumentHash() {
@@ -17,6 +18,7 @@ inline uint64_t StudioDocumentHash() {
   };
   for (const auto &s : g_Sounds) {
     bytes(&s.Id, sizeof(s.Id));
+    bytes(s.Data.data(), s.Data.size());
     bytes(s.Name.data(), s.Name.size());
     bytes(s.Path.data(), s.Path.size());
     bytes(s.Position, sizeof(s.Position));
@@ -26,6 +28,12 @@ inline uint64_t StudioDocumentHash() {
     bytes(&s.Spatial, sizeof(s.Spatial));
     bytes(&s.Autoplay, sizeof(s.Autoplay));
   }
+  bytes(&g_Game.StartupScript, sizeof(int));
+  bytes(&g_Game.CameraTarget, sizeof(uint64_t));
+  bytes(&g_Game.CameraDistance, sizeof(float));
+  bytes(&g_Game.CameraPitch, sizeof(float));
+  bytes(&g_Game.CameraYaw, sizeof(float));
+  bytes(g_Game.Title.data(), g_Game.Title.size());
   bytes(g_SkyTop, sizeof(g_SkyTop));
   bytes(g_SkyBottom, sizeof(g_SkyBottom));
   bytes(&g_SkyPreset, sizeof(g_SkyPreset));
@@ -43,6 +51,10 @@ struct StudioHistory {
       n += o.Name.size() + o.UV.size() * 4 + o.Normals.size() * 4 +
            o.BaseMesh.Positions.size() * 4 + o.BaseMesh.Indices.size() * 4 +
            o.BaseMesh.UV.size() * 4;
+      n += o.BaseMesh.Colors.size() * 4 + o.BaseMesh.Normals.size() * 4;
+      for (const auto &material : o.Materials)
+        n += sizeof(StudioMaterial) + material.Image.size() +
+             material.Texture.size() + material.Name.size();
       for (const auto &f : o.Faces)
         n += f.size() * 4;
       for (const auto &f : o.BaseMesh.Faces)
@@ -52,7 +64,7 @@ struct StudioHistory {
             p.first.size() + sizeof(ObjectProperty) + p.second.TextValue.size();
     }
     for (const auto &a : s.Sounds)
-      n += a.Name.size() + a.Path.size();
+      n += a.Name.size() + a.Path.size() + a.Data.size();
     return n;
   }
   void Capture(const std::vector<GameObject> &) {
@@ -68,6 +80,7 @@ struct StudioHistory {
     std::copy(g_SkyBottom, g_SkyBottom + 3, s.Bottom);
     s.Sky = g_SkyPreset;
     s.Physics = g_Physics;
+    s.Game = g_Game;
     s.Hash = hash;
     size_t n = Size(s);
     if (n > 128 * 1024 * 1024)
@@ -97,6 +110,7 @@ struct StudioHistory {
     std::copy(s.Bottom, s.Bottom + 3, g_SkyBottom);
     g_SkyPreset = s.Sky;
     g_Physics = s.Physics;
+    g_Game = s.Game;
     g_SelectedSound = -1;
     g_SelectedObjectIndex = -1;
     g_SimulationRunning = false;

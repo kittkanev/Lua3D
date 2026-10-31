@@ -16,7 +16,13 @@ struct ModelingResult {
 };
 static thread_local std::string g_ModelWorkerReport;
 static std::future<ModelingResult> g_ModelJob;
-static bool g_ModifierEditPending = false;
+struct ModifierDraft {
+  bool Active = false;
+  uint64_t Object = 0;
+  size_t Index = 0;
+  StudioModifier Value;
+};
+static ModifierDraft g_ModifierDraft;
 static bool g_ModelBusy = false;
 static uint64_t g_ModelInputHash = 0;
 static void
@@ -32,7 +38,7 @@ QueueModelJob(const std::function<void(std::vector<GameObject> &)> &operation) {
     try {
       g_ModelWorkerReport.clear();
       operation(snapshot);
-      r.Report=g_ModelWorkerReport;
+      r.Report = g_ModelWorkerReport;
       r.Objects = std::move(snapshot);
     } catch (const std::exception &e) {
       r.Error = e.what();
@@ -198,6 +204,9 @@ static void RenderModelTools() {
       for (size_t i = 0; i < o.Modifiers.size(); ++i) {
         ImGui::PushID(int(i));
         auto mod = o.Modifiers[i];
+        if (g_ModifierDraft.Active && g_ModifierDraft.Object == o.Id &&
+            g_ModifierDraft.Index == i)
+          mod = g_ModifierDraft.Value;
         bool changed = ImGui::Checkbox(names[mod.Type], &mod.Enabled);
         if (mod.Type == StudioModifier::Mirror) {
           const char *axes[] = {"X", "Y", "Z"};
@@ -213,12 +222,18 @@ static void RenderModelTools() {
           changed = ImGui::DragFloat("Width", &mod.Amount, .01f, .0001f, 100) ||
                     changed;
         if (changed) {
-          o.Modifiers[i] = mod;
-          g_ModifierEditPending = true;
+          g_ModifierDraft.Active = true;
+          g_ModifierDraft.Object = o.Id;
+          g_ModifierDraft.Index = i;
+          g_ModifierDraft.Value = mod;
         }
-        if (g_ModifierEditPending && !ImGui::IsAnyItemActive()) {
-          g_ModifierEditPending = false;
-          QueueSelectedMesh([](GameObject &a) { Model::Evaluate(a); });
+        if (g_ModifierDraft.Active && g_ModifierDraft.Object == o.Id &&
+            g_ModifierDraft.Index == i && !ImGui::IsAnyItemActive()) {
+          g_ModifierDraft.Active = false;
+          QueueSelectedMesh([i, mod](GameObject &a) {
+            a.Modifiers.at(i) = mod;
+            Model::Evaluate(a);
+          });
         }
         if (ImGui::SmallButton("Update"))
           QueueSelectedMesh([](GameObject &a) { Model::Evaluate(a); });

@@ -37,6 +37,7 @@ extern "C" {
 #include <exception>
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #endif
 static const size_t MAX_CONSOLE_LINES = 500;
 
@@ -68,21 +69,15 @@ static void ApplySkyPreset(int preset) {
 }
 static void AppendConsole(const std::string& msg);
 #include "studio_sounds.h"
+#include "game_state.h"
 #include "editor_history.h"
 static float g_PlayTop[3],g_PlayBottom[3];
 static int g_PlaySky=0;
 static PhysicsState g_PlayPhysics;
 
-static void StartSimulation() {
-    if(!g_PhysicsRunning){g_PlaySnapshot=g_Objects;g_PlaySoundSnapshot=g_Sounds;std::copy(g_SkyTop,g_SkyTop+3,g_PlayTop);std::copy(g_SkyBottom,g_SkyBottom+3,g_PlayBottom);g_PlaySky=g_SkyPreset;g_PlayPhysics=g_Physics;}
-    for(const auto& sound:g_Sounds)if(sound.Autoplay)PlayStudioSound(sound);
-    g_Physics.Accumulator=0;g_PhysicsRunning=true;g_SimulationRunning=true;
-}
-static void StopSimulation() {
-    if(g_PhysicsRunning){std::copy(g_PlayTop,g_PlayTop+3,g_SkyTop);std::copy(g_PlayBottom,g_PlayBottom+3,g_SkyBottom);g_SkyPreset=g_PlaySky;g_Physics=g_PlayPhysics;g_Objects=g_PlaySnapshot;for(const auto& sound:g_Sounds)studio_audio_unload(sound.Id);g_Sounds=g_PlaySoundSnapshot;g_SelectedSound=-1;}
-    g_PhysicsRunning=false;g_SimulationRunning=false;g_Physics.Accumulator=0;g_SelectedObjectIndex=-1;
-    studio_audio_stop_all();
-}
+static void StartSimulation();
+static void StopSimulation();
+static void CreateSampleGame();
 
 char g_ScriptBuffer[1024 * 16] =
     "-- Lunoryx: Interactive Demo Script\n"
@@ -539,6 +534,7 @@ static int l_get_material(lua_State* L) {
 
 #include "scene_bindings.h"
 #include "model_commands.h"
+#include "game_bindings.h"
 
 static void InitLuaState() {
     ShutdownLuaState();
@@ -581,6 +577,7 @@ static void InitLuaState() {
     lua_register(g_LuaState, "export_glb",       LuaBinding<l_export_glb>);
     RegisterSoundBindings(g_LuaState);
     lua_register(g_LuaState,"mesh_operation",LuaBinding<l_mesh_operation>);
+    lua_register(g_LuaState,"input_key",LuaBinding<l_input_key>);lua_register(g_LuaState,"game_score",LuaBinding<l_game_score>);lua_register(g_LuaState,"hud_text",LuaBinding<l_hud_text>);lua_register(g_LuaState,"follow_camera",LuaBinding<l_follow_camera>);lua_register(g_LuaState,"restart_game",LuaBinding<l_restart_game>);
 }
 
 static void ShutdownLuaState() {
@@ -875,11 +872,22 @@ static bool ExportGLB(const std::string& filename) {
 #include "material_render.h"
 #include "editor_audio.h"
 #include "editor_ui.h"
+#include "game_runtime.h"
+#include "example_game.h"
 #include "studio_mcp.h"
 #include "tests/gizmo_smoke.h"
+#include "tests/game_smoke.h"
 #include "assets/logo_data.h"
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    std::vector<std::string> arguments;std::vector<char*> pointers;int wideCount=0;LPWSTR* wide=CommandLineToArgvW(GetCommandLineW(),&wideCount);if(wide){for(int i=0;i<wideCount;++i){int n=WideCharToMultiByte(CP_UTF8,0,wide[i],-1,nullptr,0,nullptr,nullptr);std::string value(size_t(n),' ');WideCharToMultiByte(CP_UTF8,0,wide[i],-1,&value[0],n,nullptr,nullptr);value.resize(size_t(n-1));arguments.push_back(std::move(value));}LocalFree(wide);for(auto& value:arguments)pointers.push_back(&value[0]);pointers.push_back(nullptr);argc=wideCount;argv=pointers.data();}
+#endif
+    try{std::map<std::string,std::vector<unsigned char>> assets;g_PlayerMode=GamePackage::Read(GamePackage::ExecutablePath(),assets);if(g_PlayerMode)VirtualAssets()=std::move(assets);}catch(const std::exception& e){if(argc>1&&std::strcmp(argv[1],"--verify-package")==0)std::cerr<<e.what()<<"\n";else SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Lunoryx - invalid game package",e.what(),nullptr);return 1;}
+    if(argc>1&&std::strcmp(argv[1],"--verify-package")==0){if(!g_PlayerMode)return 2;std::cout<<"PASS: embedded game checksum, manifest and resource ranges\n";return 0;}
+    if(!g_PlayerMode&&argc>=3&&std::strcmp(argv[1],"--create-example")==0){InitializeStudio();InitLuaState();CreateSampleGame();bool ok=SaveStudioProject(argv[2]);ShutdownLuaState();return ok?0:1;}
+    if(!g_PlayerMode&&argc>=4&&std::strcmp(argv[1],"--build-game")==0){InitializeStudio();InitLuaState();bool ok=LoadStudioProject(argv[2])&&BuildStudioGame(argv[3],argc>4?argv[4]:"");if(!ok)std::cerr<<g_ConsoleOutput;ShutdownLuaState();return ok?0:1;}
+
     if(argc>1&&std::strcmp(argv[1],"--mcp")==0)return RunStudioMcp();
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -950,12 +958,14 @@ int main(int argc, char* argv[]) {
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,logoWidth,logoHeight,0,GL_RGBA,GL_UNSIGNED_BYTE,logo);glBindTexture(GL_TEXTURE_2D,0);stbi_image_free(logo);
     }
-    char* preferenceDirectory=SDL_GetPrefPath("Lunoryx","Studio-v02");if(preferenceDirectory){g_PreferencesPath=std::string(preferenceDirectory)+"settings.json";SDL_free(preferenceDirectory);}LoadEditorPreferences();SDL_GL_SetSwapInterval(g_Preferences.VSync?1:0);if(g_Preferences.Theme==1)ImGui::StyleColorsLight();
+    if(!g_PlayerMode){char* preferenceDirectory=SDL_GetPrefPath("Lunoryx","Studio-v02");if(preferenceDirectory){g_PreferencesPath=std::string(preferenceDirectory)+"settings.json";SDL_free(preferenceDirectory);}LoadEditorPreferences();SDL_GL_SetSwapInterval(g_Preferences.VSync?1:0);if(g_Preferences.Theme==1)ImGui::StyleColorsLight();}
     InitializeStudio();
     g_Studio.Snap=g_Preferences.MoveSnap;g_Studio.TransformSnap=g_Preferences.SnapEnabled;g_Studio.LocalTransform=g_Preferences.LocalTransform;
     InitLuaState();
-    ExecuteLuaScript(g_ScriptBuffer);
-    g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);g_SavedDocumentHash=CompleteDocumentHash();
+    if(g_PlayerMode){if(!LoadStudioProject("/__lunoryx_bundle__/project.lunoryx")){SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,"Cannot load game",g_ConsoleOutput.c_str(),window);return 1;}SDL_SetWindowTitle(window,g_Game.Title.c_str());StartSimulation();}
+    else ExecuteLuaScript(g_ScriptBuffer);
+    if(!g_PlayerMode)g_SimulationRunning=false;
+    g_ObjectHistory.Capture(g_Objects);g_SavedDocumentHash=CompleteDocumentHash();
     if(argc>1&&std::strcmp(argv[1],"--report-modeling")==0){
         g_Objects.clear();GameObject box("Beveled mesh");auto mesh=Model::FromObject(box);Model::Polygonize(mesh);Model::ToObject(box,mesh);StudioModifier bevel;bevel.Type=StudioModifier::Bevel;bevel.Amount=.12f;Model::AddModifier(box,bevel);box.Position[0]=-1.3f;box.Position[1]=.6f;box.Color[0]=.2f;box.Color[1]=.75f;box.Color[2]=.9f;box.Selected=true;g_Objects.push_back(box);
         GameObject a("Boolean A"),b("Boolean B");b.Position[0]=.4f;b.Position[1]=.4f;auto result=Model::Boolean(a,b,1);result.Name="Boolean Difference";result.Position[0]=1.2f;result.Position[1]=.6f;g_Objects.push_back(result);g_SelectedObjectIndex=0;
@@ -977,8 +987,11 @@ int main(int argc, char* argv[]) {
     float cameraAngleY = -35.0f;
     float cameraTarget[3] = {0.0f, 1.0f, 0.0f};
 
+    GameSmokeTest gameSmoke;gameSmoke.Enabled=std::getenv("LUNORYX_GAME_SMOKE")!=nullptr;
     GizmoSmokeTest gizmoSmoke;gizmoSmoke.Enabled=std::getenv("LUNORYX_GIZMO_SMOKE")!=nullptr;gizmoSmoke.Initialize();
     Uint32 lastTicks = SDL_GetTicks();
+    bool historyPending=false,shownDirty=ProjectDirty(),cameraWasPlaying=false;
+    float editCameraDistance=0,editCameraPitch=0,editCameraYaw=0,editCameraTarget[3]={};
 
     while (!done) {
         Uint32 currentTicks = SDL_GetTicks();
@@ -996,22 +1009,26 @@ int main(int argc, char* argv[]) {
         }
         float dt = (float)(currentTicks - lastTicks) / 1000.0f;
         if (dt > 0.1f) dt = 0.1f;
+        if(gameSmoke.Enabled)dt=1.f/60;
         lastTicks = currentTicks;
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            if(event.type==SDL_KEYDOWN||event.type==SDL_TEXTINPUT||event.type==SDL_MOUSEBUTTONUP||event.type==SDL_MOUSEBUTTONDOWN||event.type==SDL_MOUSEMOTION||event.type==SDL_DROPFILE)historyPending=true;
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
-                RequestProjectAction(1);
+                {if(g_PlayerMode)done=true;else RequestProjectAction(1);}
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
-                RequestProjectAction(1);
+                {if(g_PlayerMode)done=true;else RequestProjectAction(1);}
 
-            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")RequestProjectAction(2,path);else if(extension==".glb")ImportStudioGLB(path);else ImportStudioSound(path);}
+            if(!g_PlayerMode&&event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")RequestProjectAction(2,path);else if(extension==".glb")ImportStudioGLB(path);else ImportStudioSound(path);}
             if(event.type==SDL_KEYDOWN&&!event.key.repeat) {
-                if(event.key.keysym.sym==SDLK_s&&(event.key.keysym.mod&KMOD_CTRL))SaveCurrentProject();
-                if(event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
-                if(event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
-                if(event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
+                if(g_PlayerMode&&event.key.keysym.sym==SDLK_ESCAPE)done=true;
+                if(g_PlayerMode&&event.key.keysym.sym==SDLK_r)g_RestartGame=true;
+                if(!g_PlayerMode&&event.key.keysym.sym==SDLK_s&&(event.key.keysym.mod&KMOD_CTRL))SaveCurrentProject();
+                if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
+                if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
+                if(!g_PlayerMode&&event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
             }
             int mouseX=0,mouseY=0;SDL_GetMouseState(&mouseX,&mouseY);
             if (SceneContains(float(mouseX),float(mouseY))) {
@@ -1036,17 +1053,19 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        if(g_RestartGame){g_RestartGame=false;StopSimulation();StartSimulation();}
         UpdateLuaScript(dt);
         if(g_PhysicsRunning) {
-            if(g_Studio.SceneActive&&!io.WantTextInput) {
+            if((g_PlayerMode||g_Studio.SceneActive)&&!io.WantTextInput) {
                 const Uint8* keys=SDL_GetKeyboardState(nullptr);
                 for(auto& object:g_Objects)if(object.Character&&object.Dynamic) {
                     float x=float(keys[SDL_SCANCODE_D])-float(keys[SDL_SCANCODE_A]);
                     float z=float(keys[SDL_SCANCODE_S])-float(keys[SDL_SCANCODE_W]);
+                    bool jump=keys[SDL_SCANCODE_SPACE]!=0;gameSmoke.Input(object,x,z,jump);
                     float length=std::sqrt(x*x+z*z);if(length>0){x/=length;z/=length;}
                     float angle=-cameraAngleY*PI/180,c=std::cos(angle),sn=std::sin(angle);
                     object.Velocity[0]=(x*c+z*sn)*object.MoveSpeed;object.Velocity[2]=(-x*sn+z*c)*object.MoveSpeed;
-                    if(keys[SDL_SCANCODE_SPACE]&&object.Grounded)object.Velocity[1]=object.JumpSpeed;
+                    if(jump&&object.Grounded)object.Velocity[1]=object.JumpSpeed;
                 }
             }
             AdvancePhysics(g_Objects,g_Physics,dt);
@@ -1058,6 +1077,10 @@ int main(int argc, char* argv[]) {
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
 
+        gameSmoke.Audio();
+        if(!g_PlayerMode){if(g_PhysicsRunning&&!cameraWasPlaying){editCameraDistance=cameraDistance;editCameraPitch=cameraAngleX;editCameraYaw=cameraAngleY;std::copy(cameraTarget,cameraTarget+3,editCameraTarget);}if(!g_PhysicsRunning&&cameraWasPlaying){cameraDistance=editCameraDistance;cameraAngleX=editCameraPitch;cameraAngleY=editCameraYaw;std::copy(editCameraTarget,editCameraTarget+3,cameraTarget);}cameraWasPlaying=g_PhysicsRunning;}
+        FollowGameCamera(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget);
+        if(!g_PlayerMode){
         // Transparent DockSpace Setup (PassthruCentralNode + NoBackground so 3D scene is visible)
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -1111,20 +1134,23 @@ int main(int argc, char* argv[]) {
                 g_SimulationRunning = !g_SimulationRunning;
             }
             ImGui::Text(" | Objects: %d | FPS: %.1f", (int)g_Objects.size(), io.Framerate);
-            if(ProjectDirty())ImGui::TextUnformatted(" * Unsaved");
+            if(shownDirty)ImGui::TextUnformatted(" * Unsaved");
             ImGui::EndMenuBar();
         }
         ImGui::End();
 
-        PollModelJob();
+        bool wasModelBusy=g_ModelBusy;PollModelJob();if(wasModelBusy&&!g_ModelBusy)historyPending=true;
         RenderProjectDialogs();if(g_ExitRequested)done=true;
         RenderStudio(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget,dt);
         gizmoSmoke.Check();if(gizmoSmoke.Done)done=true;
         RenderStudioAudio();
+
+        if(historyPending&&!g_PhysicsRunning&&!ImGui::IsAnyItemActive()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(ImGuiMouseButton_Left)){g_ObjectHistory.Capture(g_Objects);shownDirty=ProjectDirty();historyPending=false;}
+
+
+        }else{g_Studio.SceneActive=true;g_Studio.SceneMin=ImVec2(0,0);g_Studio.SceneSize=io.DisplaySize;}
+        DrawGameHUD();
         Vec3 listener=CameraVector({0,0,cameraDistance},cameraAngleX,cameraAngleY);float listenerPosition[3]={listener.x+cameraTarget[0],listener.y+cameraTarget[1],listener.z+cameraTarget[2]};studio_audio_listener(listenerPosition,g_Preferences.MasterVolume);
-        if(!g_PhysicsRunning&&!ImGui::IsAnyItemActive()&&!ImGuizmo::IsUsing()&&!ImGui::IsMouseDown(ImGuiMouseButton_Left))g_ObjectHistory.Capture(g_Objects);
-
-
         // Rendering
         ImGui::Render();
 
@@ -1143,8 +1169,8 @@ int main(int argc, char* argv[]) {
         if(g_Studio.SceneActive) {
         float pixelScaleX=io.DisplayFramebufferScale.x,pixelScaleY=io.DisplayFramebufferScale.y;
         int sceneWidth=std::max(1,int(g_Studio.SceneSize.x*pixelScaleX)),sceneHeight=std::max(1,int(g_Studio.SceneSize.y*pixelScaleY));
-        g_ViewportTarget.Resize(sceneWidth,sceneHeight);
-        g_ViewportTarget.BindFramebuffer(GL_FRAMEBUFFER,g_ViewportTarget.Framebuffer);
+        if(!g_PlayerMode)g_ViewportTarget.Resize(sceneWidth,sceneHeight);
+        g_ViewportTarget.BindFramebuffer(GL_FRAMEBUFFER,g_PlayerMode?0:g_ViewportTarget.Framebuffer);
         glViewport(0,0,sceneWidth,sceneHeight);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
         RenderSky();
         // Setup 3D Projection Matrix
@@ -1171,10 +1197,10 @@ int main(int argc, char* argv[]) {
         glRotatef(cameraAngleY, 0.0f, 1.0f, 0.0f);
         glTranslatef(-cameraTarget[0], -cameraTarget[1], -cameraTarget[2]);
 
-        if (g_ShowGrid) {
+        if (g_ShowGrid&&!g_PlayerMode) {
             RenderGrid(cameraDistance,cameraTarget);
         }
-        if (g_ShowAxes) {
+        if (g_ShowAxes&&!g_PlayerMode) {
             RenderAxesGizmo(1.5f);
         }
 
@@ -1209,7 +1235,7 @@ int main(int argc, char* argv[]) {
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             }
 
-            if (obj.Selected || i == g_SelectedObjectIndex) {
+            if (!g_PlayerMode&&(obj.Selected || i == g_SelectedObjectIndex)) {
                 if(obj.Vertices.empty())RenderSelectionBox();
                 else {
                     float lo[3]={obj.Vertices[0],obj.Vertices[1],obj.Vertices[2]},hi[3]={lo[0],lo[1],lo[2]};
@@ -1229,16 +1255,21 @@ int main(int argc, char* argv[]) {
         // Render ImGui overlay
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        if(capturePath&&++captureFrame==5&&fb_width<=4096&&fb_height<=4096) {
+        bool captureNow=gameSmoke.Enabled?(g_GameScore==3&&!gameSmoke.Captured):(++captureFrame==5);
+        if(capturePath&&captureNow&&fb_width<=4096&&fb_height<=4096) {
+            gameSmoke.Captured=true;
             std::vector<unsigned char> pixels(size_t(fb_width)*fb_height*3);
             glPixelStorei(GL_PACK_ALIGNMENT,1);glReadPixels(0,0,fb_width,fb_height,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
             stbi_flip_vertically_on_write(1);stbi_write_png(capturePath,fb_width,fb_height,3,pixels.data(),fb_width*3);stbi_flip_vertically_on_write(0);
         }
         SDL_GL_SwapWindow(window);
+        if(gameSmoke.Enabled){if(gameSmoke.Phase==0&&g_GameScore==3&&gameSmoke.AudioEnergy>.01){g_RestartGame=true;gameSmoke.Phase=1;}else if(gameSmoke.Phase==1&&g_GameScore==0){bool reset=true;for(const auto& o:g_Objects)if(o.Name.find("Gem ")==0){auto p=o.Properties.find("Collected");reset=reset&&p!=o.Properties.end()&&!p->second.BoolValue;}if(reset){gameSmoke.Passed=true;done=true;}}}
     }
+    if(gameSmoke.Enabled)std::cout<<(gameSmoke.Passed?"PASS: third-person input, physics, all pickups, score, embedded audio, HUD and restart\n":"FAIL: third-person game smoke did not complete\n");
 
+    if(gameSmoke.Enabled&&!gameSmoke.Passed){std::cerr<<"score="<<g_GameScore<<" audio="<<gameSmoke.AudioEnergy<<"\n";for(const auto& o:g_Objects)if(o.Character)std::cerr<<"player="<<o.Position[0]<<","<<o.Position[1]<<","<<o.Position[2]<<" velocity="<<o.Velocity[0]<<","<<o.Velocity[1]<<","<<o.Velocity[2]<<" dynamic="<<o.Dynamic<<"\n";std::cerr<<"frames="<<gameSmoke.Frames<<" elapsed="<<(SDL_GetTicks()-start_time)<<" physics="<<g_PhysicsRunning<<" dtacc="<<g_Physics.Accumulator<<"\n";std::cerr<<"phase="<<gameSmoke.Phase<<"\n";for(const auto& o:g_Objects)if(o.Name.find("Gem ")==0)std::cerr<<o.Name<<" collected="<<o.Properties.at("Collected").BoolValue<<" position="<<o.Position[0]<<","<<o.Position[1]<<","<<o.Position[2]<<"\n";std::cerr<<g_ConsoleOutput;}
     // Cleanup
-    PersistStudioPreferences();
+    if(!g_PlayerMode)PersistStudioPreferences();
     ShutdownLuaState();
     studio_audio_shutdown();
     ClearStudioTextures();
@@ -1252,5 +1283,5 @@ int main(int argc, char* argv[]) {
     SDL_DestroyWindow(window);
     SDL_Quit();
 
-    return gizmoSmoke.Enabled&&!gizmoSmoke.Passed?1:0;
+    return (gizmoSmoke.Enabled&&!gizmoSmoke.Passed)||(gameSmoke.Enabled&&!gameSmoke.Passed)?1:0;
 }

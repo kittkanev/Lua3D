@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -20,6 +21,10 @@ inline std::wstring WidePath(const std::string &s) {
 #else
 #include <unistd.h>
 #endif
+inline std::map<std::string, std::vector<unsigned char>> &VirtualAssets() {
+  static std::map<std::string, std::vector<unsigned char>> assets;
+  return assets;
+}
 inline FILE *AssetOpen(const std::string &path, const char *mode) {
   if (path.empty() || path.find('\0') != std::string::npos)
     return nullptr;
@@ -119,6 +124,12 @@ inline std::string RelativeAssetPath(const std::string &asset,
 }
 inline std::vector<unsigned char>
 ReadAssetFile(const std::string &path, size_t limit = 256 * 1024 * 1024) {
+  auto embedded = VirtualAssets().find(NormalizePath(path));
+  if (embedded != VirtualAssets().end()) {
+    if (embedded->second.size() > limit)
+      throw std::runtime_error("Resource exceeds size limit");
+    return embedded->second;
+  }
   FILE *f = AssetOpen(path, "rb");
   if (!f)
     throw std::runtime_error("Cannot open resource: " + path);
@@ -141,6 +152,8 @@ ReadAssetFile(const std::string &path, size_t limit = 256 * 1024 * 1024) {
   return data;
 }
 inline bool AssetExists(const std::string &path) {
+  if (VirtualAssets().count(NormalizePath(path)))
+    return true;
   FILE *f = AssetOpen(path, "rb");
   if (!f)
     return false;

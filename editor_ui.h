@@ -29,6 +29,7 @@ static bool g_ShowUV=false;
 static GameObject g_SculptUndo("Sculpt Undo");
 static GLuint g_LogoTexture=0;
 #include "editor_project.h"
+#include "game_package.h"
 
 static void SelectObject(int index,bool toggle=false) {
     if(index<0||size_t(index)>=g_Objects.size())return;
@@ -111,6 +112,7 @@ static Vec3 CameraVector(Vec3 v,float pitch,float yaw) {
 }
 #include "editor_modeling.h"
 #include "editor_uv.h"
+#include "editor_game.h"
 #include "editor_gizmo.h"
 
 static void SceneInteraction(float distance,float pitch,float yaw,const float target[3],float dt) {
@@ -327,6 +329,7 @@ static void RenderTools(float& distance,float& pitch,float& yaw,float target[3])
                 ImGui::EndDisabled();ImGui::EndDisabled();
                 ImGui::TextWrapped("Select a mesh, subdivide for detail, then brush its surface with LMB. Shift inverts Inflate. Brush size is object-local.");
             } else if(tab==2) {
+                RenderGameSettings();
                 auto& c=g_Studio.Character;
                 ImGui::SliderFloat("Height",&c.Height,1,4);ImGui::SliderFloat("Body Width",&c.Width,.3f,1.5f);ImGui::SliderFloat("Head Size",&c.HeadSize,.15f,std::min(.8f,c.Height*.4f));
                 ImGui::ColorEdit3("Outfit",c.BodyColor);ImGui::ColorEdit3("Skin",c.SkinColor);

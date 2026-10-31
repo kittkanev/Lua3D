@@ -8,6 +8,7 @@ struct StudioMesh {
 struct StudioMaterial {
   std::string Name = "Material", Texture;
   std::vector<unsigned char> Image;
+  mutable uint32_t CachedTexture = 0, TextureGeneration = 0;
   float Color[3] = {1, 1, 1}, Metallic = 0, Roughness = .5f;
 };
 struct StudioModifier {

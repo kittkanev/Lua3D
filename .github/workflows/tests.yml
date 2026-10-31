@@ -19,6 +19,9 @@ jobs:
         run: KEEP_TEST_GLB=1 make -j2 engine test-integration
       - name: Test Studio MCP and audio codecs
         run: python tools/test_studio_mcp.py ./engine && python tools/test_studio_audio.py
+      - name: Test self-contained game and relocated resources
+        run: |
+          LUNORYX_GAME_GUI=1 LUNORYX_GAME_SMOKE=1 SDL_VIDEODRIVER=offscreen LIBGL_ALWAYS_SOFTWARE=1 LUNORYX_CAPTURE_PATH="$PWD/build/game-linux.png" python3 tools/test_game_package.py ./engine
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -42,6 +45,7 @@ jobs:
             build/gizmo-smoke.png
             build/modeling.png
             build/uv.png
+            build/game-linux.png
       - name: Address, undefined behavior and leak checks
         run: |
           make clean
@@ -72,7 +76,7 @@ jobs:
   windows:
     runs-on: windows-2022
     needs: mingw
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -94,3 +98,22 @@ jobs:
           $env:LUNORYX_AUDIO_NULL='1'
           & ./studio_audio_tests.exe tests/tone.wav
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare verified software OpenGL for Windows GUI tests
+        shell: pwsh
+        run: ./tools/prepare_windows_mesa.ps1
+      - name: Test native game packaging and complete the level on Windows
+        shell: pwsh
+        run: |
+          $env:LUNORYX_GAME_GUI='1'
+          $env:LUNORYX_GAME_SMOKE='1'
+          $env:GALLIUM_DRIVER='llvmpipe'
+          $env:LUNORYX_CAPTURE_PATH=Join-Path $PWD 'build/game-windows.png'
+          python tools/test_game_package.py ./engine.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lunoryx-game-demo
+          path: |
+            build/GemTrail.exe
+            build/game-windows.png

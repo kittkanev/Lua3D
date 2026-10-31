@@ -3,6 +3,7 @@
 struct StudioSound {
   uint64_t Id = NewObjectId();
   std::string Name = "Sound", Path;
+  std::vector<unsigned char> Data;
   float Position[3] = {0, 0, 0}, Volume = 1, Pitch = 1;
   bool Loop = false, Spatial = false, Autoplay = false;
 };
@@ -16,7 +17,14 @@ static void ConfigureStudioSound(const StudioSound &s) {
 }
 static bool PlayStudioSound(const StudioSound &s) {
   char error[256];
-  if (!studio_audio_load(s.Id, s.Path.c_str(), error)) {
+  auto embedded = VirtualAssets().find(NormalizePath(s.Path));
+  bool loaded = !s.Data.empty() ? studio_audio_load_memory(s.Id, s.Data.data(),
+                                                           s.Data.size(), error)
+                : embedded == VirtualAssets().end()
+                    ? studio_audio_load(s.Id, s.Path.c_str(), error)
+                    : studio_audio_load_memory(s.Id, embedded->second.data(),
+                                               embedded->second.size(), error);
+  if (!loaded) {
     AppendConsole(std::string(error) + "\n");
     return false;
   }
