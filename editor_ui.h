@@ -25,6 +25,7 @@ struct StudioState {
     std::array<ScriptDocument,8> Scripts;
 };
 static StudioState g_Studio;
+static bool g_ShowUV=false;
 static GameObject g_SculptUndo("Sculpt Undo");
 static GLuint g_LogoTexture=0;
 #include "editor_project.h"
@@ -77,6 +78,7 @@ static void StudioMenu() {
         if(ImGui::MenuItem("Redo scene edit","Ctrl+Y")){if(g_ObjectHistory.Redo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
         ImGui::EndDisabled();ImGui::EndMenu();
     }
+    if(ImGui::MenuItem("UV"))g_ShowUV=true;
     if(ImGui::MenuItem("Audio"))g_ShowAudio=true;
     if(ImGui::MenuItem("Settings"))g_Preferences.ShowSettings=true;
     if(ImGui::BeginMenu("Window")) {
@@ -108,6 +110,7 @@ static Vec3 CameraVector(Vec3 v,float pitch,float yaw) {
     v.z=-s*v.x+c*v.z;v.x=x;return v;
 }
 #include "editor_modeling.h"
+#include "editor_uv.h"
 #include "editor_gizmo.h"
 
 static void SceneInteraction(float distance,float pitch,float yaw,const float target[3],float dt) {
@@ -277,6 +280,7 @@ static void RenderProperties(float target[3]) {
                 const char* types[]={"Number","Boolean","Text"};ImGui::Combo("Type",&type,types,3);
                 if(ImGui::Button("Add Property")){ObjectProperty value;value.Type=ObjectProperty::Kind(type);if(!SetProperty(o,propertyName,value))AppendConsole("Property name must contain 1..64 bytes.\n");}
             }
+            RenderMaterialTools(o);
             if(!o.Vertices.empty())ImGui::Text("%d vertices | %d triangles",int(o.Vertices.size()/3),int(o.Indices.size()/3));
             if(ImGui::Button("Focus")) { std::copy(o.Position,o.Position+3,target); }
             ImGui::SameLine();
@@ -372,6 +376,7 @@ static void RenderDocs() {
 static void RenderStudio(float& distance,float& pitch,float& yaw,float target[3],float dt) {
     RenderWorkspace(distance,pitch,yaw,target,dt);
     RenderEditorSettings();
+    RenderUVEditor();
     if(!g_Studio.FullscreenCode){RenderExplorer();RenderProperties(target);RenderTools(distance,pitch,yaw,target);RenderOutput();RenderDocs();}
 }
 static void RenderSky() {

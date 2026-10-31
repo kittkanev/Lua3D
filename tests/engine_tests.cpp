@@ -184,6 +184,11 @@ int main() {
     g_Objects.clear();g_Objects.emplace_back("Stacked");StudioModifier mirror;Model::AddModifier(g_Objects[0],mirror);uint64_t stable=g_Objects[0].Id;
     assert(SaveStudioProject("tests/modeling.lunoryx"));g_Objects.clear();assert(LoadStudioProject("tests/modeling.lunoryx"));assert(g_Objects[0].Id==stable&&g_Objects[0].Modifiers.size()==1&&g_Objects[0].BaseMesh.Faces.size()==12);
     InitLuaState();CheckLua("assert(mesh_operation(0,'apply')==0)");ShutdownLuaState();assert(g_Objects[0].Modifiers.empty());
+    g_Objects.clear();g_Objects.emplace_back("Textured round trip");auto uvMesh=Model::FromObject(g_Objects[0]);Model::Unwrap(uvMesh);assert(uvMesh.UV.size()==uvMesh.Positions.size()/3*2);for(float uv:uvMesh.UV)assert(std::isfinite(uv)&&uv>=0&&uv<=1);Model::ToObject(g_Objects[0],uvMesh);
+    unsigned char pixels[12]={255,0,0,0,255,0,0,0,255,255,255,255};assert(stbi_write_png("tests/texture.png",2,2,3,pixels,6));StudioMaterial texture;texture.Texture=AbsoluteAssetPath("tests/texture.png");g_Objects[0].Materials.push_back(texture);g_Objects[0].Color[0]=g_Objects[0].Color[1]=g_Objects[0].Color[2]=1;
+    assert(ExportGLB("tests/textured.glb"));std::string importReport;auto imported=ReadGLBObjects("tests/textured.glb",importReport);assert(imported.size()==1&&!imported[0].UV.empty()&&!imported[0].Materials[0].Image.empty());assert(imported[0].Normals.size()==imported[0].Vertices.size());g_Objects=imported;
+    assert(SaveStudioProject("tests/textured.lunoryx"));assert(LoadStudioProject("tests/textured.lunoryx")&&!g_Objects[0].Materials[0].Image.empty());
+    std::remove("tests/texture.png");
     // Completed operations cover audio and environment, and Play restores both.
     g_PhysicsRunning=false;g_ObjectHistory.Clear();g_Sounds.clear();g_ObjectHistory.Capture(g_Objects);
     float originalSky=g_SkyTop[0];g_SkyTop[0]=.37f;StudioSound tone;tone.Path="missing.wav";g_Sounds.push_back(tone);g_ObjectHistory.Capture(g_Objects);

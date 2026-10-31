@@ -8,7 +8,7 @@ LDLIBS = build/deps/manifold-windows/src/libmanifold.a -L$(LUA_DIR) -llua $(SDL_
 LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 
 IMGUI_SRC = extensions/ImGuizmo/ImGuizmo.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/backends/imgui_impl_sdl2.cpp imgui/backends/imgui_impl_opengl3.cpp
-OBJS = $(addprefix $(BUILD_DIR)/obj/,$(IMGUI_SRC:.cpp=.o)) $(BUILD_DIR)/obj/extensions/audio/audio_backend.o $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o
+OBJS = $(addprefix $(BUILD_DIR)/obj/,$(IMGUI_SRC:.cpp=.o)) $(BUILD_DIR)/obj/extensions/audio/audio_backend.o $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o $(BUILD_DIR)/obj/extensions/xatlas/xatlas.o
 ENGINE_OBJ = $(BUILD_DIR)/obj/main.o
 TEST_OBJ = $(BUILD_DIR)/obj/tests/engine_tests.o
 DEPS = $(OBJS:.o=.d) $(ENGINE_OBJ:.o=.d) $(TEST_OBJ:.o=.d)
@@ -65,3 +65,7 @@ build/deps/manifold-windows/src/libmanifold.a:
 $(BUILD_DIR)/modeling_tests.exe: tests/modeling_tests.cpp mesh_modeling.h studio_mesh_types.h $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o
 	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $< $(BUILD_DIR)/obj/extensions/modeling/boolean_adapter.o build/deps/manifold-windows/src/libmanifold.a $(LDFLAGS) -o $@
 tests: $(BUILD_DIR)/modeling_tests.exe
+
+$(BUILD_DIR)/obj/extensions/xatlas/xatlas.o: extensions/xatlas/xatlas.cpp extensions/xatlas/xatlas.h
+	mkdir -p $(dir $@)
+	$(CXX) -std=c++11 -O2 -w -c $< -o $@

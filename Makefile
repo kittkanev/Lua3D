@@ -15,7 +15,7 @@ IMGUI_SRC = \
 	imgui/backends/imgui_impl_opengl3.cpp
 
 SRC = main.cpp extensions/ImGuizmo/ImGuizmo.cpp $(IMGUI_SRC)
-OBJS = $(SRC:.cpp=.o) extensions/audio/audio_backend.o extensions/modeling/boolean_adapter.o
+OBJS = $(SRC:.cpp=.o) extensions/audio/audio_backend.o extensions/modeling/boolean_adapter.o extensions/xatlas/xatlas.o
 DEPS = $(OBJS:.o=.d) tests/engine_tests.d
 
 all: engine
@@ -61,3 +61,6 @@ build/deps/manifold-linux/src/libmanifold.a:
 
 tests/modeling_tests: tests/modeling_tests.cpp mesh_modeling.h studio_mesh_types.h extensions/modeling/boolean_adapter.o
 	$(CXX) -std=c++11 -Wall -Wextra -Werror -O2 $(EXTRA_CXXFLAGS) $< extensions/modeling/boolean_adapter.o build/deps/manifold-linux/src/libmanifold.a -lpthread $(EXTRA_LDFLAGS) -o $@
+
+extensions/xatlas/xatlas.o: extensions/xatlas/xatlas.cpp extensions/xatlas/xatlas.h
+	$(CXX) -std=c++11 -O2 -w $(EXTRA_CXXFLAGS) -c $< -o $@
