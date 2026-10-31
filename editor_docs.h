@@ -7,7 +7,7 @@ static const ApiTopic kApiTopics[]={
 {"Getting started",R"DOC(LUNORYX STUDIO
 Scene tab: orbit with RMB, pan with MMB, zoom with the wheel.
 Q/W/E/R: Select/Move/Rotate/Scale. Drag gizmo axes or planes to transform objects.
-Local and Snap are in the Scene toolbar; Edit offers object undo/redo (Ctrl+Z/Y).
+Local and Snap are in the Scene toolbar; Edit offers scene undo/redo (Ctrl+Z/Y).
 Settings stores camera, grid, snap, theme, VSync and master volume.
 Audio imports WAV/MP3/FLAC/OGG/W64/RF64; files can be dragged onto the window.
 Click to select. Ctrl+click selects multiple objects. Explorer shows objects and scripts.
@@ -64,7 +64,7 @@ Mass: 0.01..10000. Restitution: 0..1. Velocity components: -10000..10000.
 function on_update(dt)
     -- Lua animation callback; seconds, clamped by the editor frame loop.
 end
-Running a new script clears the previous on_update. Other Lua globals persist.
+Running a new script clears the previous on_update. Other Lua globals persist within that Lua state; each new Play creates a fresh state.
 Errors pause Lua. Calls have a 1,000,000-instruction budget.
 Scripts are TRUSTED: standard libraries can access files and processes.
 )DOC"},
@@ -85,7 +85,7 @@ Sources' scripts and custom properties are not merged.
 Sculpt subdivision limit: 4 passes per operation; 200,000 vertices per mesh.
 The selected brush operates in LOCAL coordinates and exports to GLB.
 Tools > Sculpt has Undo Last Stroke. Edit > Undo/Redo also snapshots objects and meshes.
-Script text and audio are not part of object history.
+Script text has its own Undo. Scene history also includes audio and environment.
 )DOC"},
 {"Editable properties",R"DOC(local i = find_object('Player')
 set_property(i, 'Health', 100)
@@ -108,7 +108,7 @@ local ok = export_glb('scene.glb')
 if not ok then print('Export failed: check the destination folder') end
 
 Export includes visible primitives, sculpted/joined meshes, vertex colors,
-transforms in degrees converted to quaternions, and PBR material factors.
+transforms in degrees converted to quaternions, normals, UV, textures and PBR material factors.
 It excludes Lua code, callbacks, custom properties, physics and the skybox.
 The viewport has simple directional shading; it is not a full PBR renderer.
 Paths must point to an existing writable folder. No directory is auto-created.
@@ -124,7 +124,7 @@ Audio window: volume, pitch, loop, autoplay, spatial position, preview/stop.
 MCP: start Lunoryx.exe --mcp from your MCP client (stdio transport).
 The process uses this original engine with a separate headless scene.
 Tools: scene_list, add_object, set_transform, remove_object, project_save,
-project_load, export_glb, run_lua, add_sound, undo_objects, redo_objects.
+project_load, export_glb, run_lua, add_sound, undo_objects, redo_objects, mesh_operation.
 Use stable object IDs returned by MCP; legacy Lua continues to use array indices.
 Save via project_save, then open the project in Studio. Loaded scripts do not run.
 run_lua executes TRUSTED Lua with standard libraries, as in the original editor.
