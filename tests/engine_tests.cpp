@@ -204,6 +204,7 @@ int main() {
     StudioMesh seamed;seamed.Positions={0,0,0,1,0,0,2,0,0,0,0,1,1,0,1,2,0,1};seamed.Faces={{0,3,4,1},{1,4,5,2}};seamed.Seams={Model::Edge(1,4)};Model::Triangulate(seamed);Model::Unwrap(seamed);assert(seamed.Positions.size()/3>=8&&!seamed.Seams.empty());auto island=Model::UVIsland(seamed,0);assert(island.size()<seamed.Positions.size()/3);
     Model::Unwrap(seamed);assert(!seamed.Seams.empty());
     CreateSampleGame();uint64_t editorHash=CompleteDocumentHash();StartSimulation();g_SkyTop[0]=.99f;g_Objects[0].Position[0]=123;g_GameScore=2;StopSimulation();assert(CompleteDocumentHash()==editorHash&&g_GameScore==0);
+    std::map<std::string,std::vector<unsigned char>> tooManyResources;for(int i=0;i<257;++i)tooManyResources["asset"+std::to_string(i)]={};bool budgetRejected=false;try{GamePackage::Write("unused","unused",tooManyResources);}catch(const std::runtime_error& e){budgetRejected=std::string(e.what()).find("255")!=std::string::npos;}assert(budgetRejected);
     std::promise<void> gate;auto ready=gate.get_future().share();uint64_t beforeJob=StudioSceneFingerprint(g_Objects);QueueModelJob([ready](std::vector<GameObject>& objects){ready.wait();objects[0].Name="Stale worker result";});g_Game.StartupScript=-1;StartSimulation();gate.set_value();g_ModelJob.wait();PollModelJob();assert(!g_ModelBusy&&StudioSceneFingerprint(g_Objects)==beforeJob);StopSimulation();
     ShutdownLuaState();
     std::cout << "PASS: Lua bounds, stack recovery, hostile metamethods, GLB buffer round trip\n";

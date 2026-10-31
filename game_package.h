@@ -99,6 +99,7 @@ inline bool Read(const std::string &executable,
 inline void
 Write(const std::string &runtime, const std::string &destination,
       const std::map<std::string, std::vector<unsigned char>> &assets) {
+  if(assets.size()>256)throw std::runtime_error("Game supports at most 255 packed external resources");
   auto binary = ReadAssetFile(runtime, 128 * 1024 * 1024);
   if (binary.size() > 32 &&
       !std::memcmp(binary.data() + binary.size() - 32, "LNXPCK01", 8))
