@@ -27,6 +27,7 @@ extern "C" {
 
 #include "scene_tools.h"
 #include "file_output.h"
+#include "asset_io.h"
 #include "engine_version.h"
 #include "editor_transform.h"
 #include "extensions/ImGuizmo/ImGuizmo.h"
@@ -65,14 +66,18 @@ static void ApplySkyPreset(int preset) {
 }
 static void AppendConsole(const std::string& msg);
 #include "studio_sounds.h"
+#include "editor_history.h"
+static float g_PlayTop[3],g_PlayBottom[3];
+static int g_PlaySky=0;
+static PhysicsState g_PlayPhysics;
 
 static void StartSimulation() {
-    if(!g_PhysicsRunning){g_PlaySnapshot=g_Objects;g_PlaySoundSnapshot=g_Sounds;}
+    if(!g_PhysicsRunning){g_PlaySnapshot=g_Objects;g_PlaySoundSnapshot=g_Sounds;std::copy(g_SkyTop,g_SkyTop+3,g_PlayTop);std::copy(g_SkyBottom,g_SkyBottom+3,g_PlayBottom);g_PlaySky=g_SkyPreset;g_PlayPhysics=g_Physics;}
     for(const auto& sound:g_Sounds)if(sound.Autoplay)PlayStudioSound(sound);
     g_Physics.Accumulator=0;g_PhysicsRunning=true;g_SimulationRunning=true;
 }
 static void StopSimulation() {
-    if(g_PhysicsRunning){g_Objects=g_PlaySnapshot;for(const auto& sound:g_Sounds)studio_audio_unload(sound.Id);g_Sounds=g_PlaySoundSnapshot;g_SelectedSound=-1;}
+    if(g_PhysicsRunning){std::copy(g_PlayTop,g_PlayTop+3,g_SkyTop);std::copy(g_PlayBottom,g_PlayBottom+3,g_SkyBottom);g_SkyPreset=g_PlaySky;g_Physics=g_PlayPhysics;g_Objects=g_PlaySnapshot;for(const auto& sound:g_Sounds)studio_audio_unload(sound.Id);g_Sounds=g_PlaySoundSnapshot;g_SelectedSound=-1;}
     g_PhysicsRunning=false;g_SimulationRunning=false;g_Physics.Accumulator=0;g_SelectedObjectIndex=-1;
     studio_audio_stop_all();
 }
@@ -136,7 +141,7 @@ static void AppendConsole(const std::string& msg) {
 }
 
 #include "editor_preferences.h"
-static StudioObjectHistory g_ObjectHistory;
+static StudioHistory g_ObjectHistory;
 
 static void ClearConsole() {
     g_ConsoleLines.clear();
@@ -956,7 +961,7 @@ int main(int argc, char* argv[]) {
     g_Studio.Snap=g_Preferences.MoveSnap;g_Studio.TransformSnap=g_Preferences.SnapEnabled;g_Studio.LocalTransform=g_Preferences.LocalTransform;
     InitLuaState();
     ExecuteLuaScript(g_ScriptBuffer);
-    g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);
+    g_SimulationRunning=false;g_ObjectHistory.Capture(g_Objects);g_SavedDocumentHash=CompleteDocumentHash();
 
     const Uint32 start_time = SDL_GetTicks();
     const uint64_t timeout_ms = ParseTestTimeoutMs(std::getenv("TEST_TIMEOUT"));
@@ -995,12 +1000,13 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
-                done = true;
+                RequestProjectAction(1);
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
-                done = true;
+                RequestProjectAction(1);
 
-            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")LoadStudioProject(path);else ImportStudioSound(path);}
+            if(event.type==SDL_DROPFILE){std::string path=event.drop.file?event.drop.file:"";SDL_free(event.drop.file);std::string extension=path.substr(path.find_last_of('.')==std::string::npos?path.size():path.find_last_of('.'));for(char& c:extension)if(c>='A'&&c<='Z')c=char(c-'A'+'a');if(extension==".lunoryx")RequestProjectAction(2,path);else ImportStudioSound(path);}
             if(event.type==SDL_KEYDOWN&&!event.key.repeat) {
+                if(event.key.keysym.sym==SDLK_s&&(event.key.keysym.mod&KMOD_CTRL))SaveCurrentProject();
                 if(event.key.keysym.sym==SDLK_F11){g_Studio.FullscreenCode=!g_Studio.FullscreenCode;if(g_Studio.FullscreenCode)g_Studio.RequestDocument=g_Studio.ActiveScript;}
                 if(event.key.keysym.sym==SDLK_F5&&g_Studio.Scripts[g_Studio.ActiveScript].Open)ExecuteLuaScript(g_Studio.Scripts[g_Studio.ActiveScript].Code);
                 if(event.key.keysym.sym==SDLK_F6){if(g_PhysicsRunning)StopSimulation();else StartSimulation();}
@@ -1072,8 +1078,9 @@ int main(int argc, char* argv[]) {
         if (ImGui::BeginMenuBar()) {
             if (ImGui::BeginMenu("File")) {
                 ImGui::InputText("Project path",g_ProjectPath,sizeof(g_ProjectPath));
-                if(ImGui::MenuItem("Save Project"))SaveStudioProject(g_ProjectPath);
-                if(ImGui::MenuItem("Load Project"))LoadStudioProject(g_ProjectPath);
+                if(ImGui::MenuItem("Save Project","Ctrl+S"))SaveCurrentProject();
+                if(ImGui::MenuItem("Save Project As..."))g_OpenSaveAs=true;
+                if(ImGui::MenuItem("Load Project"))RequestProjectAction(2,g_ProjectPath);
                 if (ImGui::MenuItem("Export GLB")) {
                     if (ExportGLB("export.glb")) {
                         AppendConsole("> Exported binary scene to export.glb\n");
@@ -1082,11 +1089,10 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 if (ImGui::MenuItem("Clear Scene")) {
-                    g_Objects.clear();
-                    g_SelectedObjectIndex = -1;
+                    RequestProjectAction(3);
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem("Exit")) done = true;
+                if (ImGui::MenuItem("Exit")) RequestProjectAction(1);
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("View")) {
@@ -1101,10 +1107,12 @@ int main(int argc, char* argv[]) {
                 g_SimulationRunning = !g_SimulationRunning;
             }
             ImGui::Text(" | Objects: %d | FPS: %.1f", (int)g_Objects.size(), io.Framerate);
+            if(ProjectDirty())ImGui::TextUnformatted(" * Unsaved");
             ImGui::EndMenuBar();
         }
         ImGui::End();
 
+        RenderProjectDialogs();if(g_ExitRequested)done=true;
         RenderStudio(cameraDistance,cameraAngleX,cameraAngleY,cameraTarget,dt);
         gizmoSmoke.Check();if(gizmoSmoke.Done)done=true;
         RenderStudioAudio();

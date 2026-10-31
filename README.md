@@ -3,10 +3,10 @@
   <br/><strong>LUNORYX STUDIO</strong>
 </p>
 
-> **0.2.1-alpha.2: снова прежний Studio v0.2.** Переработка v0.3 отменена.
+> **0.2.2-beta.1: надёжность прежнего Studio.** История звука и окружения, защита несохранённых изменений и переносимые пути ресурсов.
 > Сохранены старый интерфейс, докинг, вкладки и API. Добавлены проверяемые изменения
 > в существующий редактор: манипуляторы, сетка, настройки, звук и MCP.
-> [Изменения выпуска](docs/release-notes-v0.2.1-alpha.2.md).
+> [Изменения выпуска](docs/release-notes-v0.2.2-beta.1.md).
 
 ### Управление дополнениями 0.2.1
 
@@ -33,7 +33,7 @@
 
 
 <p align="center">
-  <a href="https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml"><img src="https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build and tests" /></a>
+  <a href="https://github.com/kittkanev/Lunoryx/actions/workflows/tests.yml"><img src="https://github.com/kittkanev/Lunoryx/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build and tests" /></a>
   <img src="https://img.shields.io/badge/C%2B%2B-11-608cff" alt="C++11" />
   <img src="https://img.shields.io/badge/Lua-5.4-75dada" alt="Lua 5.4" />
   <img src="https://img.shields.io/badge/export-GLB%202.0-a6b7ec" alt="GLB 2.0" />
@@ -47,11 +47,11 @@
   <a href="#архитектура">Архитектура</a>
 </p>
 
-> **Ранняя тестовая версия · v0.2.1-alpha.2**
+> **Ранняя тестовая версия · v0.2.2-beta.1**
 > Возможны баги, нестабильная работа и потеря несохранённых изменений.
 > Выпуск предназначен для знакомства и тестирования. Сохраняйте резервные копии важных файлов.
 >
-> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.1-alpha.2)** — самостоятельный `Lunoryx.exe`, без отдельной DLL и консоли.
+> **[Скачать первый Windows-релиз](https://github.com/kittkanev/Lunoryx/releases/tag/v0.2.2-beta.1)** — самостоятельный `Lunoryx.exe`, без отдельной DLL и консоли.
 
 **Lunoryx** (ранее Lua3D) — небольшой настольный 3D-редактор на C++ с Lua 5.4, OpenGL и Dear ImGui.
 Сцена редактируется через инспектор или скрипт; `on_update(dt)` позволяет анимировать объекты без пересборки приложения.
@@ -70,7 +70,7 @@
 sudo apt-get update
 sudo apt-get install -y build-essential liblua5.4-dev libsdl2-dev libgl1-mesa-dev
 
-git clone https://github.com/kittkanev/Lua3D.git
+git clone https://github.com/kittkanev/Lunoryx.git
 cd Lua3D
 make -j2
 ./engine
@@ -81,13 +81,13 @@ make -j2
 
 ### Windows · готовая сборка
 
-Скачай **`Lunoryx-v0.2.1-alpha.2-windows-x64.zip`** со страницы
-[Releases](https://github.com/kittkanev/Lua3D/releases/tag/v0.2.1-alpha.2).
+Скачай **`Lunoryx-v0.2.2-beta.1-windows-x64.zip`** со страницы
+[Releases](https://github.com/kittkanev/Lunoryx/releases/tag/v0.2.2-beta.1).
 Запусти **`Lunoryx.exe`** напрямую. Дополнительные DLL и файлы для работы не требуются; логотип, справка и лицензии встроены в приложение. ZIP добавляет примеры и текстовые инструкции.
 В архив включены пример Lua, инструкция и лицензии сторонних компонентов.
 
 Актуальные сборки из `main` также доступны как артефакт `lua3d-windows-x64`
-в [Build and tests](https://github.com/kittkanev/Lua3D/actions/workflows/tests.yml?query=branch%3Amain).
+в [Build and tests](https://github.com/kittkanev/Lunoryx/actions/workflows/tests.yml?query=branch%3Amain).
 
 ### Windows · кросс-компиляция на Linux
 

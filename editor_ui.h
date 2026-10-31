@@ -73,8 +73,8 @@ static void BuildStudioLayout(ImGuiID dockspace,const ImGuiViewport* viewport) {
 static void StudioMenu() {
     if(ImGui::BeginMenu("Edit")) {
         ImGui::BeginDisabled(g_PhysicsRunning);
-        if(ImGui::MenuItem("Undo objects","Ctrl+Z")){if(g_ObjectHistory.Undo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
-        if(ImGui::MenuItem("Redo objects","Ctrl+Y")){if(g_ObjectHistory.Redo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
+        if(ImGui::MenuItem("Undo scene edit","Ctrl+Z")){if(g_ObjectHistory.Undo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
+        if(ImGui::MenuItem("Redo scene edit","Ctrl+Y")){if(g_ObjectHistory.Redo(g_Objects)){g_SelectedObjectIndex=-1;g_SimulationRunning=false;}}
         ImGui::EndDisabled();ImGui::EndMenu();
     }
     if(ImGui::MenuItem("Audio"))g_ShowAudio=true;

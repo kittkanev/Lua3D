@@ -138,6 +138,7 @@ static nlohmann::json StudioMcpCall(const std::string &tool,
           sound.Name.find('\0') != std::string::npos || g_Sounds.size() >= 64)
         throw std::runtime_error("Invalid sound reference");
       g_Sounds.push_back(sound);
+      g_ObjectHistory.Capture(g_Objects);
       return StudioMcpText("OK");
     }
     return StudioMcpText("Unknown tool", true);
