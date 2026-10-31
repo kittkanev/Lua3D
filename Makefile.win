@@ -1,4 +1,4 @@
-CXX = x86_64-w64-mingw32-g++
+CXX = x86_64-w64-mingw32-g++-posix
 LUA_DIR ?= build/deps/lua-5.4.6/src
 SDL_DIR ?= build/deps/SDL2-2.30.0/x86_64-w64-mingw32
 BUILD_DIR ?= build/win

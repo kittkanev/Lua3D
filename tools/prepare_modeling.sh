@@ -13,7 +13,7 @@ build_dir=build/deps/manifold-linux
 options=()
 if [ "${1:-}" = windows ]; then
   build_dir=build/deps/manifold-windows
-  options+=(-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++)
+  options+=(-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++-posix)
 fi
 "$cmake_bin" -S build/deps/manifold -B "$build_dir" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DMANIFOLD_CROSS_SECTION=OFF -DMANIFOLD_PAR=OFF -DMANIFOLD_TEST=OFF -DMANIFOLD_CBIND=OFF -DMANIFOLD_PYBIND=OFF "${options[@]}"
 "$cmake_bin" --build "$build_dir" --parallel 2
